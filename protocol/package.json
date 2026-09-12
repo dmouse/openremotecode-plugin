@@ -1,0 +1,38 @@
+{
+  "name": "@openremotecode/protocol",
+  "version": "0.1.0",
+  "description": "Platform-neutral encrypted protocol contracts for Open Remote Code",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "pnpm run clean && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node scripts/generate-activity.mjs --check && pnpm run build && node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@hpke/core": "1.9.0",
+    "zod": "4.1.8"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3"
+  }
+}
