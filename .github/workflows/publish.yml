@@ -1,0 +1,62 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: ci
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm run build
+
+      # Trusted publishing (OIDC) needs npm CLI >=11.5.1; pin explicitly
+      # rather than trust whatever ships with actions/setup-node's Node build.
+      - name: Ensure npm supports trusted publishing
+        run: npm install -g npm@latest
+
+      # pnpm pack (unlike npm pack) rewrites the protocol package's
+      # workspace:* dependency to its real published version, so opencode's
+      # tarball is installable outside this workspace.
+      - name: Pack protocol
+        working-directory: protocol
+        run: pnpm pack --pack-destination "$RUNNER_TEMP/tarballs"
+
+      - name: Pack opencode plugin
+        working-directory: agents/opencode
+        run: pnpm pack --pack-destination "$RUNNER_TEMP/tarballs"
+
+      # Publish via npm, not pnpm: npm's OIDC trusted-publisher exchange is
+      # implemented in the npm CLI itself. protocol must publish first since
+      # opencode depends on it.
+      - name: Publish protocol
+        run: npm publish "$RUNNER_TEMP"/tarballs/openremotecode-protocol-*.tgz --access public --provenance
+
+      - name: Publish opencode plugin
+        run: npm publish "$RUNNER_TEMP"/tarballs/openremotecode-opencode-*.tgz --access public --provenance
