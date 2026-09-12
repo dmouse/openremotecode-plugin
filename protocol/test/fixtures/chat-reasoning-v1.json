@@ -1,0 +1,106 @@
+{
+  "nativeParts": [
+    {
+      "id": "prt_before",
+      "type": "text",
+      "text": "I’ll review the chat screen."
+    },
+    {
+      "id": "prt_thought",
+      "type": "reasoning",
+      "text": "**Prepare passive link builder**\n\nCheck how links are displayed.",
+      "time": {
+        "start": 1000,
+        "end": 19800
+      },
+      "metadata": {
+        "syntheticSecret": "must-stay-local"
+      }
+    },
+    {
+      "id": "prt_tool",
+      "type": "tool",
+      "tool": "read",
+      "state": {
+        "status": "completed",
+        "input": {
+          "file": "synthetic"
+        },
+        "output": "private synthetic tool result"
+      }
+    },
+    {
+      "id": "prt_thought2",
+      "type": "reasoning",
+      "text": "Checking parser limits",
+      "time": {
+        "start": 20000,
+        "end": 26900
+      }
+    },
+    {
+      "id": "prt_answer",
+      "type": "text",
+      "text": "**Done.** The chat is ready."
+    },
+    {
+      "id": "prt_file",
+      "type": "file",
+      "url": "file:///synthetic-private",
+      "mime": "text/plain"
+    }
+  ],
+  "response": {
+    "version": 1,
+    "chat": {
+      "id": "ses_fixture",
+      "title": "Reasoning fixture",
+      "updatedAt": 26900
+    },
+    "messages": [
+      {
+        "id": "msg_fixture",
+        "role": "assistant",
+        "text": "I’ll review the chat screen.\n[Tool: read · completed]\n**Done.** The chat is ready.\n",
+        "truncated": false,
+        "parts": [
+          {
+            "id": "prt_before",
+            "type": "text",
+            "text": "I’ll review the chat screen.\n"
+          },
+          {
+            "id": "prt_thought",
+            "type": "reasoning",
+            "text": "**Prepare passive link builder**\n\nCheck how links are displayed.",
+            "time": {
+              "start": 1000,
+              "end": 19800
+            }
+          },
+          {
+            "id": "prt_tool",
+            "type": "text",
+            "text": "[Tool: read · completed]\n"
+          },
+          {
+            "id": "prt_thought2",
+            "type": "reasoning",
+            "text": "Checking parser limits",
+            "time": {
+              "start": 20000,
+              "end": 26900
+            }
+          },
+          {
+            "id": "prt_answer",
+            "type": "text",
+            "text": "**Done.** The chat is ready.\n"
+          }
+        ]
+      }
+    ],
+    "cursor": null,
+    "status": "idle"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "nativeParts": [
+    { "id": "shot", "type": "file", "mime": "image/png", "filename": "screenshot.png",
+      "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" }
+  ],
+  "userNativeParts": [
+    { "id": "prompt", "type": "text", "text": "Here's a screenshot" },
+    { "id": "photo", "type": "file", "mime": "image/jpeg", "filename": "photo.jpg",
+      "url": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=" },
+    { "id": "notes", "type": "file", "mime": "text/plain", "filename": "notes.txt",
+      "url": "data:text/plain;base64,Tm90ZXM=" }
+  ],
+  "response": {
+    "version": 1,
+    "chat": { "id": "ses_image", "title": "Image presentation", "updatedAt": 1000 },
+    "status": "idle", "cursor": null,
+    "messages": [
+      { "id": "msg_image", "role": "assistant", "text": "", "truncated": false,
+        "parts": [
+          { "id": "shot", "type": "image", "text": "",
+            "image": { "mime": "image/jpeg",
+              "data": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=",
+              "width": 1, "height": 1 } }
+        ] }
+    ]
+  },
+  "userResponse": { "id": "msg_user_image", "role": "user",
+    "text": "Here's a screenshot\n[File: notes.txt]\n", "truncated": false,
+    "parts": [
+      { "id": "prompt", "type": "text", "text": "Here's a screenshot\n" },
+      { "id": "photo", "type": "image", "text": "",
+        "image": { "mime": "image/jpeg",
+          "data": "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=",
+          "width": 1, "height": 1 } },
+      { "id": "notes", "type": "text", "text": "[File: notes.txt]\n" }
+    ] }
+}

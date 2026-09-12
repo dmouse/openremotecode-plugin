@@ -1,0 +1,23 @@
+{
+  "nativeTodos": [
+    { "content": "Read the relay contract", "status": "completed", "priority": "high" },
+    { "content": "Add the todo tab‮", "status": "in_progress", "priority": "medium" },
+    { "content": "Wire the banner", "status": "pending", "priority": "low" },
+    { "content": "Drop the old spike", "status": "cancelled", "priority": "low" },
+    { "content": "Run flutter analyze", "status": "queued", "priority": "PRIVATE_PRIORITY" }
+  ],
+  "response": {
+    "version": 1,
+    "chat": { "id": "ses_todos", "title": "Todo presentation", "updatedAt": 1000 },
+    "status": "busy",
+    "cursor": null,
+    "todos": [
+      { "id": "todo-0", "content": "Read the relay contract", "status": "completed" },
+      { "id": "todo-1", "content": "Add the todo tab", "status": "in_progress" },
+      { "id": "todo-2", "content": "Wire the banner", "status": "pending" },
+      { "id": "todo-3", "content": "Drop the old spike", "status": "cancelled" },
+      { "id": "todo-4", "content": "Run flutter analyze", "status": "pending" }
+    ],
+    "messages": []
+  }
+}

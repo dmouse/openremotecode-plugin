@@ -1,0 +1,17 @@
+{
+  "nativePermission": {
+    "id": "per_fixture", "sessionID": "ses_permission", "permission": "bash",
+    "patterns": ["npm i*"],
+    "metadata": { "command": "npm install", "secret": "PRIVATE_METADATA" },
+    "always": [], "time": { "created": 1000 }
+  },
+  "response": {
+    "version": 1,
+    "chat": { "id": "ses_permission", "title": "Permission presentation", "updatedAt": 1000 },
+    "status": "idle", "cursor": null,
+    "permission": {
+      "id": "per_fixture", "operation": "execute", "description": "Run a shell command", "pattern": "npm i*"
+    },
+    "messages": []
+  }
+}

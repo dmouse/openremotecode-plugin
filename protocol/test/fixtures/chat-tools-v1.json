@@ -1,0 +1,43 @@
+{
+  "nativeParts": [
+    { "id": "read", "type": "tool", "tool": "read", "state": {
+      "status": "completed", "input": { "filePath": "/workspace/lib/example.dart" },
+      "output": "PRIVATE_OUTPUT", "metadata": { "secret": "PRIVATE_METADATA" },
+      "time": { "start": 1000, "end": 1250 }
+    } },
+    { "id": "search", "type": "tool", "tool": "grep", "state": {
+      "status": "completed", "input": { "pattern": "Theme|Color", "path": "mobile/lib" },
+      "output": "PRIVATE_SEARCH_RESULTS", "metadata": {}, "title": "Search",
+      "time": { "start": 1300, "end": 1400 }
+    } },
+    { "id": "run", "type": "tool", "tool": "bash", "state": {
+      "status": "error", "input": { "command": "PRIVATE_COMMAND", "description": "Check formatting" },
+      "error": "PRIVATE_ERROR", "time": { "start": 1500, "end": 3500 }
+    } }
+  ],
+  "response": {
+    "version": 1,
+    "chat": { "id": "ses_fixture", "title": "Tool presentation", "updatedAt": 3500 },
+    "status": "idle", "cursor": null,
+    "messages": [{
+      "id": "msg_tools", "role": "assistant", "truncated": false,
+      "text": "[Tool: read · completed]\n[Tool: grep · completed]\n[Tool: bash · error]\n",
+      "parts": [
+        { "id": "read", "type": "tool", "text": "[Tool: read · completed]\n",
+          "tool": { "operation": "read", "description": "lib/example.dart", "status": "completed", "durationMs": 250 } },
+        { "id": "search", "type": "tool", "text": "[Tool: grep · completed]\n",
+          "tool": { "operation": "search", "description": "\"Theme|Color\" in mobile/lib", "status": "completed", "durationMs": 100 } },
+        { "id": "run", "type": "tool", "text": "[Tool: bash · error]\n",
+          "tool": { "operation": "execute", "description": "Check formatting", "status": "error", "durationMs": 2000 } }
+      ]
+    }]
+  },
+  "userNativeParts": [
+    { "id": "prompt", "type": "text", "text": "Review @example.dart" },
+    { "id": "call", "type": "text", "text": "Called the Read tool...", "synthetic": true },
+    { "id": "expanded", "type": "text", "text": "PRIVATE_ATTACHMENT_CONTENT", "synthetic": true },
+    { "id": "ignored", "type": "text", "text": "PRIVATE_IGNORED", "ignored": true },
+    { "id": "file", "type": "file", "filename": "example.dart", "mime": "text/plain", "url": "data:text/plain;base64,PRIVATE_DATA" }
+  ],
+  "userResponse": { "id": "msg_user", "role": "user", "text": "Review @example.dart\n[File: example.dart]\n", "truncated": false }
+}

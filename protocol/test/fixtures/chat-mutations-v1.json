@@ -1,0 +1,24 @@
+{
+  "valid": [
+    {
+      "operation": "chat.rename",
+      "request": { "version": 1, "projectId": "adfcaa47-d299-4d49-9137-fbac353c7cbd", "sessionId": "ses_source", "title": "  Renamed chat  " },
+      "parsedRequest": { "version": 1, "projectId": "adfcaa47-d299-4d49-9137-fbac353c7cbd", "sessionId": "ses_source", "title": "Renamed chat" },
+      "response": { "version": 1, "chat": { "id": "ses_source", "title": "Renamed chat", "updatedAt": 1788652800000 } }
+    },
+    {
+      "operation": "chat.fork",
+      "request": { "version": 1, "projectId": "adfcaa47-d299-4d49-9137-fbac353c7cbd", "sessionId": "ses_source" },
+      "parsedRequest": { "version": 1, "projectId": "adfcaa47-d299-4d49-9137-fbac353c7cbd", "sessionId": "ses_source" },
+      "response": { "version": 1, "chat": { "id": "ses_fork", "title": "Renamed chat (fork #1)", "updatedAt": 1788652800001 } }
+    }
+  ],
+  "invalid": [
+    { "operation": "chat.rename", "request": { "version": 1, "projectId": "adfcaa47-d299-4d49-9137-fbac353c7cbd", "sessionId": "ses_source", "title": " \t\n " } },
+    { "operation": "chat.rename", "request": { "version": 2, "projectId": "adfcaa47-d299-4d49-9137-fbac353c7cbd", "sessionId": "ses_source", "title": "Title" } },
+    { "operation": "chat.rename", "request": { "version": 1, "projectId": "adfcaa47-d299-4d49-9137-fbac353c7cbd", "sessionId": "ses_source", "title": "Title", "directory": "/other" } },
+    { "operation": "chat.fork", "request": { "version": 1, "projectId": "adfcaa47-d299-4d49-9137-fbac353c7cbd", "sessionId": "ses_source", "messageID": "msg_prefix" } },
+    { "operation": "chat.fork", "request": { "version": 1, "projectId": "adfcaa47-d299-4d49-9137-fbac353c7cbd", "sessionId": "ses_source", "title": "Not allowed" } },
+    { "operation": "chat.fork", "request": { "version": 2, "projectId": "adfcaa47-d299-4d49-9137-fbac353c7cbd", "sessionId": "ses_source" } }
+  ]
+}

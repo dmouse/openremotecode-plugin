@@ -1,0 +1,26 @@
+{
+  "userNativeParts": [
+    { "id": "marker", "type": "text", "synthetic": true, "text": "The following tool was executed by the user" }
+  ],
+  "nativeParts": [
+    { "id": "shell", "type": "tool", "tool": "bash", "state": {
+      "status": "completed", "input": { "command": "printf 'shell fixture\\n'", "extra": "PRIVATE_INPUT" },
+      "output": "shell fixture\n", "title": "", "metadata": { "output": "shell fixture\n", "secret": "PRIVATE_METADATA" },
+      "time": { "start": 1000, "end": 1250 }
+    } }
+  ],
+  "response": {
+    "version": 1,
+    "chat": { "id": "ses_shell", "title": "Shell presentation", "updatedAt": 1250 },
+    "status": "idle", "cursor": null,
+    "messages": [
+      { "id": "msg_marker", "role": "user", "text": "", "truncated": false },
+      { "id": "msg_shell", "role": "assistant", "text": "[Tool: bash · completed]\n", "truncated": false,
+        "parts": [
+          { "id": "shell", "type": "tool", "text": "[Tool: bash · completed]\n",
+            "tool": { "operation": "execute", "status": "completed", "durationMs": 250,
+              "shell": { "command": "printf 'shell fixture\\n'", "output": "shell fixture\n", "truncated": false } } }
+        ] }
+    ]
+  }
+}

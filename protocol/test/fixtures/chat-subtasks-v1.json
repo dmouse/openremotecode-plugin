@@ -1,0 +1,30 @@
+{
+  "request": {"version": 1, "projectId": "adfcaa47-d299-4d49-9137-fbac353c7cbd", "sessionId": "ses_child", "parentSessionId": "ses_parent"},
+  "nativeParts": [
+    {"id": "p0", "type": "text", "text": "I’ll inspect the palette."},
+    {"id": "p1", "type": "tool", "tool": "task", "state": {
+      "status": "completed", "input": {"description": "Inspect mobile color palette", "subagent_type": "explore", "prompt": "synthetic-local-only"},
+      "metadata": {"sessionId": "ses_child", "model": "synthetic-local-only"},
+      "output": "synthetic-local-only", "time": {"start": 1000, "end": 84000}
+    }},
+    {"id": "p2", "type": "text", "text": "**The palette is consistent.**"}
+  ],
+  "response": {
+    "version": 1,
+    "chat": {"id": "ses_parent", "title": "Review mobile chat", "updatedAt": 1788700000000},
+    "cursor": null,
+    "status": "idle",
+    "messages": [{
+      "id": "msg_parent", "role": "assistant", "truncated": false,
+      "text": "I’ll inspect the palette.\n[Tool: task · completed]\n**The palette is consistent.**\n",
+      "parts": [
+        {"id": "p0", "type": "text", "text": "I’ll inspect the palette.\n"},
+        {"id": "p1", "type": "subtask", "text": "[Tool: task · completed]\n", "task": {
+          "title": "Inspect mobile color palette", "agent": "explore", "status": "completed", "background": false,
+          "sessionId": "ses_child", "stats": {"toolCalls": 15, "complete": true, "durationMs": 82000}
+        }},
+        {"id": "p2", "type": "text", "text": "**The palette is consistent.**\n"}
+      ]
+    }]
+  }
+}

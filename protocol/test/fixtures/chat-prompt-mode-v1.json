@@ -1,0 +1,17 @@
+{
+  "valid": [
+    { "version": 1, "projectId": "00000000-0000-4000-8000-000000000001", "sessionId": "ses_fixture", "text": "Synthetic prompt" },
+    { "version": 1, "projectId": "00000000-0000-4000-8000-000000000001", "sessionId": "ses_fixture", "text": "Synthetic prompt", "mode": "build" },
+    { "version": 1, "projectId": "00000000-0000-4000-8000-000000000001", "sessionId": "ses_fixture", "text": "Synthetic prompt", "mode": "plan" }
+  ],
+  "invalidOverrides": [
+    { "mode": "general" }, { "mode": "explore" }, { "mode": "custom-agent" },
+    { "mode": "Build" }, { "mode": "PLAN" }, { "mode": " plan " }, { "mode": "" },
+    { "mode": null }, { "mode": 1 }, { "mode": true }, { "mode": ["plan"] }, { "mode": { "agent": "plan" } },
+    { "agent": "plan" }, { "mode": "build", "agent": "custom-agent" },
+    { "mode": "plan", "tools": { "bash": true } }, { "permission": "allow" },
+    { "system": "override" }, { "model": { "providerID": "fixture" } },
+    { "model": { "providerID": "fixture", "modelID": "fixture", "effort": "" } },
+    { "version": 2 }, { "text": "" }
+  ]
+}
