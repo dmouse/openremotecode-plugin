@@ -1,0 +1,23 @@
+{
+  "name": "openremotecode",
+  "private": true,
+  "packageManager": "pnpm@11.21.0",
+  "scripts": {
+    "build": "pnpm --filter @openremotecode/protocol build && pnpm --filter @openremotecode/opencode build",
+    "test": "pnpm --filter @openremotecode/protocol test && pnpm --filter @openremotecode/opencode test",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "typecheck": "pnpm --filter @openremotecode/protocol typecheck && pnpm --filter @openremotecode/opencode typecheck",
+    "release": "pnpm --filter @openremotecode/protocol publish && pnpm --filter @openremotecode/opencode publish"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.10.0",
+    "globals": "^17.12.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.70.0"
+  }
+}

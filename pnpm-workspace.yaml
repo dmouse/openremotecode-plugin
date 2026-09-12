@@ -1,0 +1,7 @@
+packages:
+  - "protocol"
+  - "agents/*"
+
+allowBuilds:
+  esbuild: true
+  msgpackr-extract: true
