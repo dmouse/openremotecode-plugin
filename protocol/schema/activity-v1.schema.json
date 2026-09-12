@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent activity v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "state"],
+  "properties": {
+    "kind": { "enum": ["reasoning", "read", "write", "edit", "apply_patch", "search", "list", "execute", "fetch", "update_tasks", "subtask", "tool"] },
+    "state": { "enum": ["pending", "running", "completed", "failed", "cancelled", "unknown"] }
+  }
+}

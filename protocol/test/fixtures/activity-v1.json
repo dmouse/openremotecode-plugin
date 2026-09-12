@@ -1,0 +1,32 @@
+{
+  "activities": [
+    { "kind": "reasoning", "state": "running" },
+    { "kind": "read", "state": "completed" },
+    { "kind": "write", "state": "pending" },
+    { "kind": "edit", "state": "failed" },
+    { "kind": "apply_patch", "state": "completed" },
+    { "kind": "search", "state": "running" },
+    { "kind": "list", "state": "completed" },
+    { "kind": "execute", "state": "cancelled" },
+    { "kind": "fetch", "state": "unknown" },
+    { "kind": "update_tasks", "state": "completed" },
+    { "kind": "subtask", "state": "running" },
+    { "kind": "tool", "state": "unknown" }
+  ],
+  "stream": {
+    "version": 1,
+    "projectId": "11111111-1111-4111-8111-111111111111",
+    "sessionId": "session",
+    "subscriptionId": "22222222-2222-4222-8222-222222222222",
+    "revision": 0,
+    "reset": false,
+    "snapshot": {
+      "version": 1,
+      "chat": { "id": "session", "title": "Agent-neutral stream", "updatedAt": 1000 },
+      "status": "busy", "cursor": null,
+      "messages": [{ "id": "message", "role": "assistant", "text": "", "truncated": false,
+        "parts": [{ "id": "reasoning", "type": "reasoning", "text": "Inspecting the project",
+          "activity": { "kind": "reasoning", "state": "running" } }] }]
+    }
+  }
+}
