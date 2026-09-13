@@ -1,0 +1,15 @@
+{
+  "sessionId": "session",
+  "messageId": "assistant",
+  "events": [
+    { "id": "e1", "type": "session.next.step.started", "properties": { "sessionID": "session", "assistantMessageID": "assistant", "timestamp": 1000 } },
+    { "id": "e2", "type": "session.next.reasoning.started", "properties": { "sessionID": "session", "assistantMessageID": "assistant", "reasoningID": "reasoning-0", "timestamp": 1001, "providerMetadata": { "private": "NOT_FOR_RELAY" } } },
+    { "id": "e3", "type": "session.next.reasoning.delta", "properties": { "sessionID": "session", "assistantMessageID": "assistant", "reasoningID": "reasoning-0", "timestamp": 1002, "delta": "Inspecting" } },
+    { "id": "e4", "type": "session.next.reasoning.delta", "properties": { "sessionID": "session", "assistantMessageID": "assistant", "reasoningID": "reasoning-0", "timestamp": 1003, "delta": " the fixture" } },
+    { "id": "e5", "type": "session.next.reasoning.ended", "properties": { "sessionID": "session", "assistantMessageID": "assistant", "reasoningID": "reasoning-0", "timestamp": 1010, "text": "Inspecting the fixture" } },
+    { "id": "e6", "type": "session.next.text.started", "properties": { "sessionID": "session", "assistantMessageID": "assistant", "textID": "text-0", "timestamp": 1011 } },
+    { "id": "e7", "type": "session.next.text.delta", "properties": { "sessionID": "session", "assistantMessageID": "assistant", "textID": "text-0", "timestamp": 1012, "delta": "Hello" } },
+    { "id": "e8", "type": "session.next.text.ended", "properties": { "sessionID": "session", "assistantMessageID": "assistant", "textID": "text-0", "timestamp": 1020, "text": "Hello world" } },
+    { "id": "e9", "type": "session.next.step.ended", "properties": { "sessionID": "session", "assistantMessageID": "assistant", "timestamp": 1021, "finish": "stop" } }
+  ]
+}
