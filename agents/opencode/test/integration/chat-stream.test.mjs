@@ -8,6 +8,39 @@ import { chatStreamUpdateSchema } from "@openremotecode/protocol"
 import { createProjectFixture, eventually } from "../support/opencode-project-fixture.mjs"
 import { openCodeEvents } from "../../dist/opencode-events.js"
 
+// The health check only confirms the HTTP server is accepting connections; the
+// SSE /event route can still race the session/plugin bootstrap immediately
+// after createProjectFixture returns, so retry the handshake like eventually()
+// already does for health.
+async function connectAgentEvents(client, directory) {
+  return eventually(async () => {
+    const observation = new AbortController()
+    const observed = new Set()
+    let ready
+    const connected = new Promise((resolve) => { ready = resolve })
+    const observing = (async () => {
+      for await (const event of openCodeEvents(client, directory, observation.signal)) {
+        observed.add(event.type)
+        if (event.type === "server.connected") ready()
+      }
+    })()
+    const failure = observing.then(() => { throw new Error("Agent event stream ended before connecting") })
+    let timer
+    try {
+      await Promise.race([connected, failure, new Promise((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("Agent event connection attempt timed out")), 3000)
+      })])
+      return { observation, observed, observing }
+    } catch (error) {
+      observation.abort()
+      await observing.catch(() => {})
+      throw error
+    } finally {
+      clearTimeout(timer)
+    }
+  }, 10_000)
+}
+
 test("native running output and completion arrive as encrypted activity updates without polling", async (t) => {
   const f = await createProjectFixture(t)
   const client = f.client(f.dirs["repo-a"])
@@ -108,18 +141,8 @@ for (const engine of ["legacy", "next"]) test(`1.18.30 ${engine} provider reason
   const projectId = (await f.remoteRequest(connection, "project.list", { version: 1 })).body.projects[0].id
   const target = { version: 1, projectId, sessionId: session.id, subscriptionId: crypto.randomUUID(), includeActivities: true }
   await f.remoteRequest(connection, "chat.stream.subscribe", target)
-  const observed = new Set()
-  const observation = new AbortController()
-  let ready
-  const connected = new Promise((resolve) => { ready = resolve })
-  const observing = (async () => {
-    for await (const event of openCodeEvents(client, f.dirs["repo-a"], observation.signal)) {
-      observed.add(event.type)
-      if (event.type === "server.connected") ready()
-    }
-  })()
+  const { observation, observed, observing } = await connectAgentEvents(client, f.dirs["repo-a"])
   t.after(async () => { observation.abort(); await observing })
-  await connected
   let next = f.remoteEvent(connection, target.subscriptionId)
   if (engine === "legacy") {
     const prompt = await f.remoteRequest(connection, "chat.prompt", { version: 1, projectId, sessionId: session.id, text: "Reply with a short fixture" })
