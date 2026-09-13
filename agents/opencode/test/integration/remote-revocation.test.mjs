@@ -85,6 +85,8 @@ test("/remote revokes via HTTP and stops the running plugin relay without a rest
   const controller = new AbortController()
   t.after(() => controller.abort())
   await tuiPlugin.tui({
+    theme: { current: { success: "#a3d977", textMuted: "#888888", text: "#ffffff" } },
+    slots: { register() { return "status-chip" } },
     keymap: { registerLayer(layer) { command = layer.commands[0]; return () => {} } },
     lifecycle: { signal: controller.signal, onDispose() {} },
     ui: {
