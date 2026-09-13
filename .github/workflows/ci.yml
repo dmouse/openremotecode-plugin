@@ -29,6 +29,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Pinned to the version the integration tests assert against
+      # (test/support/opencode-project-fixture.mjs OPENCODE_VERSION).
+      - name: Install OpenCode CLI
+        run: |
+          curl -fsSL https://opencode.ai/install | bash -s -- --version 1.18.30
+          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
       - name: Lint
         run: pnpm run lint
 
