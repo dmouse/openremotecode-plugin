@@ -5,8 +5,8 @@
   "scripts": {
     "build": "pnpm --filter @openremotecode/protocol build && pnpm --filter @openremotecode/opencode build",
     "test": "pnpm --filter @openremotecode/protocol test && pnpm --filter @openremotecode/opencode test",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
+    "lint": "pnpm --filter @openremotecode/protocol build && eslint .",
+    "lint:fix": "pnpm --filter @openremotecode/protocol build && eslint . --fix",
     "typecheck": "pnpm --filter @openremotecode/protocol typecheck && pnpm --filter @openremotecode/opencode typecheck",
     "release": "pnpm --filter @openremotecode/protocol publish && pnpm --filter @openremotecode/opencode publish"
   },
