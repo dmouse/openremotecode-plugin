@@ -142,7 +142,11 @@ for (const engine of ["legacy", "next"]) test(`1.18.30 ${engine} provider reason
   const target = { version: 1, projectId, sessionId: session.id, subscriptionId: crypto.randomUUID(), includeActivities: true }
   await f.remoteRequest(connection, "chat.stream.subscribe", target)
   const { observation, observed, observing } = await connectAgentEvents(client, f.dirs["repo-a"])
-  t.after(async () => { observation.abort(); await observing })
+  // observing only feeds the diagnostic `observed` assertion below; the connection can
+  // legitimately close on its own before cleanup (seen in CI). Attach a handler now so
+  // that later rejection is never unhandled — a real miss still fails via `observed`.
+  const observingSettled = observing.catch((error) => error)
+  t.after(async () => { observation.abort(); await observingSettled })
   let next = f.remoteEvent(connection, target.subscriptionId)
   if (engine === "legacy") {
     const prompt = await f.remoteRequest(connection, "chat.prompt", { version: 1, projectId, sessionId: session.id, text: "Reply with a short fixture" })
