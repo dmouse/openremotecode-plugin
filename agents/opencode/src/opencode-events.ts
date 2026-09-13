@@ -1,9 +1,6 @@
 import type { PluginInput } from "@opencode-ai/plugin"
 
 const MAX_EVENT_LENGTH = 1_000_000
-// Diagnostic only: never set in production. Surfaces the cause this
-// generator otherwise swallows, to debug an intermittent CI-only failure.
-const DEBUG_EVENTS = process.env.OPENCODE_REMOTE_DEBUG_EVENTS === "1"
 
 /**
  * Pinned 1.18.30 transport shim. The root SDK's event.subscribe() ignores the
@@ -18,11 +15,7 @@ export async function* openCodeEvents(client: PluginInput["client"], directory: 
     headers: { Accept: "text/event-stream" }, parseAs: "stream" as const, redirect: "error" as const }
   const result = await client.session.list(options)
   if (!result.response.ok || !result.response.headers.get("content-type")?.startsWith("text/event-stream") ||
-      !result.response.body) {
-    if (DEBUG_EVENTS) console.error("[opencode-events debug] initial response", result.response.status,
-      result.response.headers.get("content-type"))
-    throw new Error("Agent event stream unavailable")
-  }
+      !result.response.body) throw new Error("Agent event stream unavailable")
   const reader = result.response.body.getReader()
   const decoder = new TextDecoder("utf-8", { fatal: true })
   const abort = () => { void reader.cancel().catch(() => {}) }
@@ -51,7 +44,6 @@ export async function* openCodeEvents(client: PluginInput["client"], directory: 
       if (buffer.length > MAX_EVENT_LENGTH) throw new Error("Agent event limit")
     }
   } catch (cause) {
-    if (DEBUG_EVENTS) console.error("[opencode-events debug] read failed", cause)
     if (!signal.aborted) throw new Error("Agent event stream unavailable", { cause })
   } finally {
     signal.removeEventListener("abort", abort)
