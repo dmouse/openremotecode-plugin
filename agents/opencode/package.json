@@ -1,0 +1,74 @@
+{
+  "name": "@openremotecode/opencode",
+  "version": "0.1.0",
+  "description": "Secure outbound connector between OpenCode and Open Remote Code",
+  "keywords": [
+    "opencode",
+    "plugin",
+    "remote",
+    "end-to-end-encryption"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./tui": {
+      "types": "./dist/tui.d.ts",
+      "import": "./dist/tui.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "docs",
+    "src"
+  ],
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "pnpm --filter @openremotecode/protocol build && pnpm run clean && tsc -p tsconfig.json",
+    "typecheck": "pnpm --filter @openremotecode/protocol build && tsc -p tsconfig.json --noEmit",
+    "demo:connection": "pnpm run build && node scripts/dev-connection.mjs",
+    "test": "pnpm run build && node --test test/unit/*.test.mjs && node --test --test-concurrency=1 --test-timeout=45000 test/integration/*.test.mjs",
+    "test:unit": "pnpm run build && node --test test/unit/*.test.mjs",
+    "test:integration": "pnpm run build && node --test --test-concurrency=1 --test-timeout=45000 test/integration/*.test.mjs",
+    "test:projects": "pnpm run build && node --test --test-timeout=45000 test/integration/project-behavior.test.mjs",
+    "pack:check": "pnpm pack --dry-run"
+  },
+  "engines": {
+    "node": ">=24",
+    "opencode": ">=1.18.30"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "1.18.30",
+    "@opencode-ai/sdk": "1.18.30",
+    "@opentui/solid": "0.4.5",
+    "@types/node": "^24.0.0",
+    "typescript": "~5.9.3",
+    "ws": "~8.21.3"
+  },
+  "dependencies": {
+    "@openremotecode/protocol": "workspace:*",
+    "sharp": "^0.35.4",
+    "zod": "4.1.8"
+  },
+  "peerDependencies": {
+    "@opentui/solid": ">=0.4.5"
+  },
+  "peerDependenciesMeta": {
+    "@opentui/solid": {
+      "optional": true
+    }
+  }
+}
