@@ -26,6 +26,26 @@ test("adapter classifies known tools without parsing descriptions or leaking inp
   assert.deepEqual(activityFor({ type: "reasoning", time: { start: 1, end: 2 } }), { kind: "reasoning", state: "completed" })
   assert.deepEqual(activityFor({ type: "reasoning", time: { start: 1 } }, true), { kind: "reasoning", state: "unknown" })
 })
+test("a settled session retires the parts an interrupted run abandoned", () => {
+  // OpenCode writes no terminal state for the part a run was interrupted in, so
+  // it stays "running" in stored history forever. Idle with nothing waiting on
+  // the user is what proves it abandoned rather than blocked.
+  for (const status of ["pending", "running"]) {
+    assert.deepEqual(activityFor({ type: "tool", tool: "question", state: { status } }, false, true),
+      { kind: "tool", state: "cancelled" })
+  }
+  assert.deepEqual(activityFor({ type: "reasoning", time: { start: 1 } }, false, true),
+    { kind: "reasoning", state: "unknown" })
+  // A background subtask keeps running while the session that spawned it is
+  // idle; its own child status settles it, never the parent's.
+  assert.deepEqual(activityFor({ type: "tool", tool: "task", state: { status: "running" } }, false, true),
+    { kind: "subtask", state: "running" })
+  // Terminal states are never rewritten, and an unsettled session is untouched.
+  assert.deepEqual(activityFor({ type: "tool", tool: "bash", state: { status: "completed" } }, false, true),
+    { kind: "execute", state: "completed" })
+  assert.deepEqual(activityFor({ type: "tool", tool: "bash", state: { status: "running" } }, false, false),
+    { kind: "execute", state: "running" })
+})
 test("event-driven stream is idle without changes, coalesces bursts and sends changed messages only", async (t) => {
   const f = setup(t)
   assert.equal((await f.manager.subscribe(target)).revision, 0)

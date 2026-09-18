@@ -77,9 +77,10 @@ export {
 } from "./protocol/session.js";
 export { CHAT_VERSION, IMAGE_DATA_MAX, CHAT_CAPABILITIES, chatRequests, chatResponses,
   projectSummarySchema, chatSummarySchema, modelSummarySchema, chatMessagePartSchema, chatPermissionSchema,
-  chatTodoSchema,
+  chatTodoSchema, chatQuestionSchema, chatQuestionOptionSchema, chatQuestionPromptSchema,
   type ChatMessagePart, type ChatSubtask, type ChatTool, type ChatImage, type ChatPermission,
-  type ChatTodo, type ChatOperation, type ChatModelSummary } from "./protocol/chat.js"
+  type ChatTodo, type ChatOperation, type ChatModelSummary, type ChatQuestionAnswer,
+  type ChatQuestion, type ChatQuestionOption, type ChatQuestionPrompt } from "./protocol/chat.js";
 export { activitySchema, ACTIVITY_KINDS, ACTIVITY_STATES, type Activity } from "./protocol/activity.js";
 export { chatStreamRequests, chatStreamUpdateSchema, chatStreamClosedSchema, CHAT_STREAM_CAPABILITIES,
   type ChatStreamTarget, type ChatStreamUpdate } from "./protocol/chat-stream.js";

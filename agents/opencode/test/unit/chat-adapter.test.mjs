@@ -207,3 +207,22 @@ test("chat.permission.reply is once/reject only, requires membership, and never 
   failure = new DOMException("Synthetic timeout", "TimeoutError")
   await assert.rejects(adapter.execute("chat.permission.reply", { ...body, response: "once" }), { name: "TimeoutError" })
 })
+
+test("project ids are stable across restarts and distinct per directory", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "chat-project-id-"))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const other = path.join(root, "other"); await mkdir(other)
+  const client = {}
+  const list = async () => (await new OpenCodeChatAdapter(client, root, [other]).execute("project.list", {})).projects
+
+  // The regression this guards: ids were minted with crypto.randomUUID() per plugin load,
+  // so restarting OpenCode expired every chat view the phone already had open. A second
+  // adapter stands in for that restart.
+  const first = await list()
+  const second = await list()
+  assert.deepEqual(second.map((p) => p.id), first.map((p) => p.id), "project ids changed across a restart")
+  assert.notEqual(first[0].id, first[1].id, "two directories shared one id")
+  for (const project of first) {
+    assert.match(project.id, /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u)
+  }
+})

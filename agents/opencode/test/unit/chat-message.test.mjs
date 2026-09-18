@@ -136,6 +136,89 @@ test("MCP and internal actions have useful descriptions without exposing argumen
   }
 })
 
+test("a completed question tool call shows what was asked, and what was answered when the plugin resolved it", () => {
+  const questionPart = (questions) => ({ id: "p", type: "tool", tool: "question",
+    state: { status: "completed", input: { questions }, output: "PRIVATE_NATIVE_OUTPUT",
+      metadata: { answers: ["PRIVATE_NATIVE_METADATA"] }, time: { start: 0, end: 1 } } })
+  const single = [{ header: "Environment", question: "Where are you testing?",
+    options: [{ label: "Local" }, { label: "CI" }] }]
+
+  // No cache at all: still shows what was asked, from the tool's own trusted input.
+  const asked = chatMessageContent("assistant", [questionPart(single)], undefined,
+    { includeTools: true }).parts[0].tool
+  assert.equal(asked.operation, "question")
+  assert.equal(asked.description, "Environment")
+  assert.equal(JSON.stringify(asked).includes("PRIVATE_NATIVE"), false)
+
+  // A matching cached record (by sanitized content, not a native id) adds the answer.
+  const answered = chatMessageContent("assistant", [questionPart(single)], undefined,
+    { includeTools: true, answeredQuestions: [{
+      questions: [{ header: "Environment", question: "Where are you testing?",
+        options: [{ label: "Local" }, { label: "CI" }], multiple: false, custom: true }],
+      answers: ["Local"],
+    }] }).parts[0].tool
+  assert.equal(answered.description, "Environment: Local")
+
+  // A multi-question batch shows every entry, in order.
+  const batch = [
+    { header: "Environment", question: "Where?", options: [{ label: "Local" }] },
+    { header: "Platform", question: "Which platform?", multiple: true, custom: false,
+      options: [{ label: "Android" }, { label: "iOS" }] },
+  ]
+  const batchAnswered = chatMessageContent("assistant", [questionPart(batch)], undefined,
+    { includeTools: true, answeredQuestions: [{
+      questions: [
+        { header: "Environment", question: "Where?", options: [{ label: "Local" }], multiple: false, custom: true },
+        { header: "Platform", question: "Which platform?",
+          options: [{ label: "Android" }, { label: "iOS" }], multiple: true, custom: false },
+      ],
+      answers: ["Local", "Android, iOS"],
+    }] }).parts[0].tool
+  assert.equal(batchAnswered.description, "Environment: Local · Platform: Android, iOS")
+
+  // A cache entry for different question content never matches (e.g. a different batch,
+  // or a stale entry from before a restart) -- falls back to headers-only, never a wrong pairing.
+  const mismatched = chatMessageContent("assistant", [questionPart(single)], undefined,
+    { includeTools: true, answeredQuestions: [{
+      questions: [{ header: "Unrelated", question: "Something else?",
+        options: [{ label: "A" }], multiple: false, custom: true }],
+      answers: ["A"],
+    }] }).parts[0].tool
+  assert.equal(mismatched.description, "Environment")
+
+  // A rejected batch is recorded as declined for every question.
+  const declined = chatMessageContent("assistant", [questionPart(single)], undefined,
+    { includeTools: true, answeredQuestions: [{
+      questions: [{ header: "Environment", question: "Where are you testing?",
+        options: [{ label: "Local" }, { label: "CI" }], multiple: false, custom: true }],
+      answers: ["Declined"],
+    }] }).parts[0].tool
+  assert.equal(declined.description, "Environment: Declined")
+
+  // A free-text answer is re-sanitized here even though the label/question already were --
+  // it was forwarded as the user typed it and never itself passed through stripping.
+  const custom = chatMessageContent("assistant", [questionPart(single)], undefined,
+    { includeTools: true, answeredQuestions: [{
+      questions: [{ header: "Environment", question: "Where are you testing?",
+        options: [{ label: "Local" }, { label: "CI" }], multiple: false, custom: true }],
+      answers: ["Staging\x00‮"],
+    }] }).parts[0].tool
+  assert.equal(custom.description, "Environment: Staging")
+
+  // The joined description is still bounded to 256 like every other tool description.
+  const long = [{ header: "H".repeat(64), question: "Q?", options: [{ label: "x" }] },
+    { header: "H2".repeat(64), question: "Q2?", options: [{ label: "y" }] }]
+  const longResult = chatMessageContent("assistant", [questionPart(long)], undefined,
+    { includeTools: true, answeredQuestions: [{
+      questions: [
+        { header: "H".repeat(64), question: "Q?", options: [{ label: "x" }], multiple: false, custom: true },
+        { header: "H2".repeat(64), question: "Q2?", options: [{ label: "y" }], multiple: false, custom: true },
+      ],
+      answers: ["A".repeat(200), "B".repeat(200)],
+    }] }).parts[0].tool
+  assert.ok(longResult.description.length <= 256)
+})
+
 test("reasoning fixture preserves order and timing while dropping native metadata", () => {
   const { id: _id, role, ...expected } = fixture.response.messages[0]
   assert.deepEqual(chatMessageContent(role, fixture.nativeParts), expected)

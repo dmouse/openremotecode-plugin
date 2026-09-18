@@ -29,3 +29,15 @@ test("tool fields, durations and display budgets remain strict", () => {
   ]) assert.equal(chatMessagePartSchema.safeParse({ ...part, tool: { ...part.tool, ...extra } }).success, false)
   assert.equal(chatMessagePartSchema.safeParse({ ...part, metadata: {} }).success, false)
 })
+
+test("a completed question tool call's asked/answered summary is a bounded description, no shell", () => {
+  const part = fixture.response.messages[0].parts[0]
+  const questionTool = { ...part.tool, operation: "question", description: "Environment: Local · Platform: Android" }
+  assert.equal(chatMessagePartSchema.safeParse({ ...part, tool: questionTool }).success, true)
+  // A "question" operation may not carry a shell sub-object, same as any non-execute operation.
+  assert.equal(
+    chatMessagePartSchema.safeParse({ ...part, tool: { ...questionTool,
+      shell: { command: "", output: "", truncated: false } } }).success,
+    false,
+  )
+})
