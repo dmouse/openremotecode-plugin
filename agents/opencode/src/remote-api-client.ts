@@ -5,6 +5,7 @@ import {
   type PairingTranscript,
 } from "@openremotecode/protocol";
 import { validateServiceOrigin } from "./service-origin.js";
+import { ACCESS_TAG_HEADER, ACCESS_TAG_VALUE } from "./access-tag.js";
 
 export interface PairingStart {
   pairingId: string
@@ -159,6 +160,7 @@ export class RemoteAPIClient {
     const origin = validateServiceOrigin(this.#serviceOrigin);
     const response = await this.request(new URL(path, origin), {
       ...init,
+      headers: { [ACCESS_TAG_HEADER]: ACCESS_TAG_VALUE, ...(init.headers as Record<string, string> | undefined) },
       redirect: "error",
       cache: "no-store",
       signal: init.signal
