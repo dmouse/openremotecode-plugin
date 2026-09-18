@@ -37,11 +37,11 @@ The plugin includes a versioned HPKE authenticated envelope using P-256, HKDF-SH
 
 ## Revoking remote access
 
-Run `/remote` and press Enter on **Active token** to open its service, connector, and expiration details. Choose **Back** to return, or **Revoke remote access** and confirm. The service revokes the linked connector, the plugin stops its relay, and its saved authorization and old connector key are removed. Your local OpenCode chats remain available. Restart OpenCode when you want a fresh pairing code. All plugin instances sharing the same `OPENCODE_REMOTE_DATA_DIR` share this authorization and are disconnected together.
+Run `/remote` and press Enter on **Active token** to open its service, connector, and expiration details. Choose **Back** to return, or **Revoke remote access** and confirm. The plugin stops its relay and removes its saved authorization and old connector key immediately, before contacting the service — a slow, offline, or misbehaving server can never keep the local relay running past a confirmed revoke. Your local OpenCode chats remain available. Restart OpenCode when you want a fresh pairing code. All plugin instances sharing the same `OPENCODE_REMOTE_DATA_DIR` share this authorization and are disconnected together.
 
 Token details also show **Linked**, with the original pairing date and a relative age such as **3 days ago**. New pairings save the server-provided `linkedAt` timestamp locally. For older saved authorizations, the dialog requests the date from `GET /v1/connectors/self`; if the server is unavailable or predates this endpoint, it displays **Date unavailable**. Age is never inferred from expiration or file timestamps. The Active indicator uses OpenCode's success theme color.
 
-If revocation fails, the dialog offers Refresh so you can retry; saved authorization is retained until the server confirms revocation and local cleanup completes. The server must include the `POST /v1/connectors/self/revoke` endpoint for this action to succeed.
+Telling the service is best-effort on top of the local disable: if `POST /v1/connectors/self/revoke` cannot be reached, the credential is queued and retried automatically the next time OpenCode starts, with no action needed from you. If the initial staleness check fails instead — the linked connector changed underneath the dialog — nothing is revoked locally and the dialog offers Refresh so you can retry against the current state.
 
 ## Development
 

@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises"
 import test from "node:test"
 
 import { FileConnectorAuthorizationStore } from "../../dist/auth/authorization-store.js"
+import { FileRevocationQueueStore, resolveRevocationQueuePath } from "../../dist/auth/revocation-queue.js"
 import { FileConnectorIdentityStore } from "../../dist/crypto/identity-store.js"
 import plugin from "../../dist/tui.js"
 import { createElement, insert, setProp, testRender } from "@opentui/solid"
@@ -23,7 +24,7 @@ async function fixture(t, { legacy = false } = {}) {
   const identity = await new FileConnectorIdentityStore(identityPath).loadOrCreate()
   const store = new FileConnectorAuthorizationStore(path.join(directory, "connector-authorization.json"))
   const authorization = {
-    version: 1, serviceOrigin: "https://paired.example.test",
+    version: 2, serviceOrigin: "https://paired.example.test",
     connectorId: "con_0123456789abcdefghijklmn", connectorKeyId: identity.publicIdentity.keyId,
     credential: `orc_${"A".repeat(43)}`, credentialExpiresAt: new Date(Date.now() + 60_000).toISOString(),
     trustedClient: identity.publicIdentity,
@@ -50,13 +51,27 @@ async function fixture(t, { legacy = false } = {}) {
     },
   })
   await command.run()
-  return { store, authorization, identityPath, command, dialog: () => dialog }
+  const revocationQueue = new FileRevocationQueueStore(resolveRevocationQueuePath())
+  return { store, revocationQueue, authorization, identityPath, command, dialog: () => dialog }
 }
 
 async function waitForResult(fixture) {
   const deadline = Date.now() + 2000
   while (fixture.dialog().options?.[0]?.title === "Revoking remote access..." && Date.now() < deadline) await delay(10)
   assert.notEqual(fixture.dialog().options?.[0]?.title, "Revoking remote access...")
+}
+
+// Local disable resolves before the background server call and queue cleanup do, so callers that
+// care about the queue settling poll for it instead of relying on the dialog's own timing.
+async function waitForQueueClear(fixture) {
+  const deadline = Date.now() + 2000
+  while (Date.now() < deadline) {
+    let queued
+    try { queued = await fixture.revocationQueue.load() } catch { queued = "pending" }
+    if (queued === undefined) return
+    await delay(10)
+  }
+  assert.equal(await fixture.revocationQueue.load(), undefined)
 }
 
 test("/remote revocation requires confirmation and cancellation retains authorization", async (t) => {
@@ -90,7 +105,7 @@ test("/remote revocation requires confirmation and cancellation retains authoriz
   assert.deepEqual(await f.store.load(), f.authorization)
 })
 
-test("confirmed revocation calls the paired service and removes authorization and the old identity", async (t) => {
+test("confirmed revocation disables locally before calling the paired service, then clears the retry queue", async (t) => {
   const f = await fixture(t)
   let requests = 0
   t.mock.method(globalThis, "fetch", async (url, init) => {
@@ -98,7 +113,12 @@ test("confirmed revocation calls the paired service and removes authorization an
     assert.equal(url.origin, f.authorization.serviceOrigin)
     assert.equal(url.pathname, "/v1/connectors/self/revoke")
     assert.equal(init.headers.Authorization, `Bearer ${f.authorization.credential}`)
-    assert.deepEqual(await f.store.load(), f.authorization)
+    // Local authorization is already gone by the time the network request goes out: a
+    // failing or malicious server must never be able to keep it alive.
+    assert.equal(await f.store.load(), undefined)
+    assert.deepEqual(await f.revocationQueue.load(), {
+      version: 1, serviceOrigin: f.authorization.serviceOrigin, credential: f.authorization.credential,
+    })
     return new Response(null, { status: 204 })
   })
   f.dialog().onSelect({ value: "details" })
@@ -110,21 +130,25 @@ test("confirmed revocation calls the paired service and removes authorization an
   assert.equal(requests, 1)
   assert.equal(f.dialog().options[0].title, "Remote access revoked")
   assert.equal(await f.store.load(), undefined)
+  await waitForQueueClear(f)
   await assert.rejects(access(f.identityPath), { code: "ENOENT" })
   assert.equal(JSON.stringify(f.dialog()).includes(f.authorization.credential), false)
 })
 
-test("failed revocation retains authorization and displays a safe retry message", async (t) => {
+test("a server failure during revocation still disables locally and queues a retry", async (t) => {
   const f = await fixture(t)
   t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify({ message: f.authorization.credential }), { status: 503 }))
   f.dialog().onSelect({ value: "details" })
   f.dialog().onSelect({ value: "revoke" })
   f.dialog().onConfirm()
   await waitForResult(f)
-  assert.match(f.dialog().options[0].description, /Refresh and retry/)
+  assert.equal(f.dialog().options[0].title, "Remote access revoked")
   assert.equal(JSON.stringify(f.dialog()).includes(f.authorization.credential), false)
-  assert.deepEqual(await f.store.load(), f.authorization)
-  await access(f.identityPath)
+  assert.equal(await f.store.load(), undefined)
+  await assert.rejects(access(f.identityPath), { code: "ENOENT" })
+  assert.deepEqual(await f.revocationQueue.load(), {
+    version: 1, serviceOrigin: f.authorization.serviceOrigin, credential: f.authorization.credential,
+  })
 })
 
 test("a stale dialog cannot revoke a replacement authorization", async (t) => {

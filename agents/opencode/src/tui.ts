@@ -3,24 +3,25 @@ import type {
   TuiPlugin,
   TuiPluginApi,
   TuiPluginModule,
-} from "@opencode-ai/plugin/tui"
-import { createElement, insert, setProp } from "@opentui/solid"
+} from "@opencode-ai/plugin/tui";
+import { createElement, insert, setProp } from "@opentui/solid";
 
 import {
   FileConnectorAuthorizationStore,
   resolveConnectorAuthorizationPath,
   type ConnectorAuthorization,
-} from "./auth/authorization-store.js"
-import { FileConnectorIdentityStore, resolveConnectorIdentityPath } from "./crypto/identity-store.js"
+} from "./auth/authorization-store.js";
+import { FileConnectorIdentityStore, resolveConnectorIdentityPath } from "./crypto/identity-store.js";
 import {
   FileConnectorPairingStore,
   resolveConnectorPairingPath,
   type PendingConnectorPairing,
-} from "./auth/pairing-store.js"
-import { RemoteAPIClient } from "./remote-api-client.js"
-import { validateServiceOrigin } from "./service-origin.js"
-import { tokenAge } from "./token-age.js"
-import { registerRemoteStatusChip } from "./tui-status-indicator.js"
+} from "./auth/pairing-store.js";
+import { FileRevocationQueueStore, resolveRevocationQueuePath } from "./auth/revocation-queue.js";
+import { RemoteAPIClient } from "./remote-api-client.js";
+import { validateServiceOrigin } from "./service-origin.js";
+import { tokenAge } from "./token-age.js";
+import { registerRemoteStatusChip } from "./tui-status-indicator.js";
 
 type RemoteStatus =
   | { type: "connected"; authorization: ConnectorAuthorization }
@@ -33,8 +34,9 @@ type RemoteAction = "regenerate" | "details" | "back" | "revoke" | "refresh" | "
 
 // eslint-disable-next-line @typescript-eslint/require-await -- TuiPlugin's type requires a Promise<void>-returning function
 const tui: TuiPlugin = async (api) => {
-  const authorizationStore = new FileConnectorAuthorizationStore(resolveConnectorAuthorizationPath())
-  const pairingStore = new FileConnectorPairingStore(resolveConnectorPairingPath())
+  const authorizationStore = new FileConnectorAuthorizationStore(resolveConnectorAuthorizationPath());
+  const pairingStore = new FileConnectorPairingStore(resolveConnectorPairingPath());
+  const revocationQueueStore = new FileRevocationQueueStore(resolveRevocationQueuePath());
 
   // api.keymap's type chain (@opentui/keymap) doesn't fully resolve through
   // this optional peer dependency; tsc accepts it under skipLibCheck.
@@ -48,38 +50,40 @@ const tui: TuiPlugin = async (api) => {
         category: "Remote",
         namespace: "palette",
         slashName: "remote",
-        run: () => showRemoteDialog(api, authorizationStore, pairingStore),
+        run: () => showRemoteDialog(api, authorizationStore, pairingStore, revocationQueueStore),
       },
     ],
-  })
+  });
   // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- see comment above on `unregister`'s origin
-  api.lifecycle.onDispose(unregister)
+  api.lifecycle.onDispose(unregister);
 
-  const stopStatusChip = registerRemoteStatusChip(api)
-  api.lifecycle.onDispose(stopStatusChip)
-}
+  const stopStatusChip = registerRemoteStatusChip(api);
+  api.lifecycle.onDispose(stopStatusChip);
+};
 
 async function showRemoteDialog(
   api: TuiPluginApi,
   authorizationStore: FileConnectorAuthorizationStore,
   pairingStore: FileConnectorPairingStore,
+  revocationQueueStore: FileRevocationQueueStore,
 ): Promise<void> {
-  let status: RemoteStatus
+  let status: RemoteStatus;
   try {
-    status = await readRemoteStatus(authorizationStore, pairingStore)
+    status = await readRemoteStatus(authorizationStore, pairingStore);
   } catch (error) {
-    status = { type: "error", message: errorMessage(error) }
+    status = { type: "error", message: errorMessage(error) };
   }
-  renderRemoteDialog(api, authorizationStore, pairingStore, status)
+  renderRemoteDialog(api, authorizationStore, pairingStore, revocationQueueStore, status);
 }
 
 function renderRemoteDialog(
   api: TuiPluginApi,
   authorizationStore: FileConnectorAuthorizationStore,
   pairingStore: FileConnectorPairingStore,
+  revocationQueueStore: FileRevocationQueueStore,
   status: RemoteStatus,
 ): void {
-  api.ui.dialog.setSize("medium")
+  api.ui.dialog.setSize("medium");
   api.ui.dialog.replace(() => api.ui.DialogSelect<RemoteAction>({
     title: "Open Remote Code",
     flat: true,
@@ -88,21 +92,21 @@ function renderRemoteDialog(
     // eslint-disable-next-line @typescript-eslint/no-misused-promises -- the "details" branch below intentionally returns a promise; callers (incl. tests) rely on awaiting it
     onSelect: (option) => {
       if (option.value === "close") {
-        api.ui.dialog.clear()
-        return
+        api.ui.dialog.clear();
+        return;
       }
       if (option.value === "refresh") {
-        void showRemoteDialog(api, authorizationStore, pairingStore)
-        return
+        void showRemoteDialog(api, authorizationStore, pairingStore, revocationQueueStore);
+        return;
       }
       if (option.value === "regenerate" && status.type === "pairing") {
-        confirmRegeneration(api, authorizationStore, pairingStore, status.pairing)
+        confirmRegeneration(api, authorizationStore, pairingStore, revocationQueueStore, status.pairing);
       }
       if (option.value === "details" && status.type === "connected") {
-        return showTokenDetails(api, authorizationStore, pairingStore, status.authorization)
+        return showTokenDetails(api, authorizationStore, pairingStore, revocationQueueStore, status.authorization);
       }
     },
-  }))
+  }));
 }
 
 function remoteOptions(api: TuiPluginApi, status: RemoteStatus): TuiDialogSelectOption<RemoteAction>[] {
@@ -158,38 +162,40 @@ async function showTokenDetails(
   api: TuiPluginApi,
   authorizationStore: FileConnectorAuthorizationStore,
   pairingStore: FileConnectorPairingStore,
+  revocationQueueStore: FileRevocationQueueStore,
   authorization: ConnectorAuthorization,
 ): Promise<void> {
   if (authorization.linkedAt) {
-    renderTokenDetails(api, authorizationStore, pairingStore, authorization)
-    return
+    renderTokenDetails(api, authorizationStore, pairingStore, revocationQueueStore, authorization);
+    return;
   }
-  const controller = new AbortController()
-  const onLeave = () => { controller.abort(); }
-  renderTokenDetails(api, authorizationStore, pairingStore, authorization, { loading: true, onLeave })
-  let linkedAt: string | undefined
+  const controller = new AbortController();
+  const onLeave = () => { controller.abort(); };
+  renderTokenDetails(api, authorizationStore, pairingStore, revocationQueueStore, authorization, { loading: true, onLeave });
+  let linkedAt: string | undefined;
   try {
     const metadata = await new RemoteAPIClient(validateServiceOrigin(authorization.serviceOrigin)).ownConnector(
       authorization.credential, AbortSignal.any([controller.signal, api.lifecycle.signal]),
-    )
-    if (metadata.connectorId !== authorization.connectorId) throw new Error("Connector metadata mismatch")
-    linkedAt = metadata.linkedAt
+    );
+    if (metadata.connectorId !== authorization.connectorId) throw new Error("Connector metadata mismatch");
+    linkedAt = metadata.linkedAt;
   } catch { /* Older servers and offline services leave the age unknown. */ }
-  if (controller.signal.aborted || api.lifecycle.signal.aborted) return
-  const current = await authorizationStore.load().catch(() => undefined)
+  if (controller.signal.aborted || api.lifecycle.signal.aborted) return;
+  const current = await authorizationStore.load().catch(() => undefined);
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- either signal can abort during the preceding await
-  if (controller.signal.aborted || api.lifecycle.signal.aborted) return
-  if (current?.credential !== authorization.credential || current.serviceOrigin !== authorization.serviceOrigin) return
+  if (controller.signal.aborted || api.lifecycle.signal.aborted) return;
+  if (current?.credential !== authorization.credential || current.serviceOrigin !== authorization.serviceOrigin) return;
   // Legacy metadata is display-only: a delayed lookup must never rewrite authorization after revocation.
-  renderTokenDetails(api, authorizationStore, pairingStore, {
+  renderTokenDetails(api, authorizationStore, pairingStore, revocationQueueStore, {
     ...authorization, ...(linkedAt ? { linkedAt } : {}),
-  })
+  });
 }
 
 function renderTokenDetails(
   api: TuiPluginApi,
   authorizationStore: FileConnectorAuthorizationStore,
   pairingStore: FileConnectorPairingStore,
+  revocationQueueStore: FileRevocationQueueStore,
   authorization: ConnectorAuthorization,
   lookup?: { loading: boolean; onLeave: () => void },
 ): void {
@@ -214,24 +220,24 @@ function renderTokenDetails(
     // eslint-disable-next-line @typescript-eslint/no-misused-promises -- the "back" branch below intentionally returns a promise; callers (incl. tests) rely on awaiting it
     onSelect: (option) => {
       if (option.value === "back") {
-        lookup?.onLeave()
-        return showRemoteDialog(api, authorizationStore, pairingStore)
+        lookup?.onLeave();
+        return showRemoteDialog(api, authorizationStore, pairingStore, revocationQueueStore);
       }
-      if (option.value !== "revoke") return
-      lookup?.onLeave()
-      let revoking = false
+      if (option.value !== "revoke") return;
+      lookup?.onLeave();
+      let revoking = false;
       api.ui.dialog.replace(() => api.ui.DialogConfirm({
         title: "Revoke remote access?",
         message: "Disconnect the linked connector and revoke its remote access. Your local chats remain available. Restart OpenCode to pair again.",
-        onCancel: () => { renderTokenDetails(api, authorizationStore, pairingStore, authorization); },
+        onCancel: () => { renderTokenDetails(api, authorizationStore, pairingStore, revocationQueueStore, authorization); },
         onConfirm: () => {
-          if (revoking) return
-          revoking = true
-          void revokeRemoteAccess(api, authorizationStore, pairingStore, authorization)
+          if (revoking) return;
+          revoking = true;
+          void revokeRemoteAccess(api, authorizationStore, pairingStore, revocationQueueStore, authorization);
         },
-      }))
+      }));
     },
-  }), lookup?.onLeave)
+  }), lookup?.onLeave);
 }
 
 function activeIndicator(api: TuiPluginApi): TuiDialogSelectOption<RemoteAction>["footer"] {
@@ -250,6 +256,7 @@ async function revokeRemoteAccess(
   api: TuiPluginApi,
   authorizationStore: FileConnectorAuthorizationStore,
   pairingStore: FileConnectorPairingStore,
+  revocationQueueStore: FileRevocationQueueStore,
   authorization: ConnectorAuthorization,
 ): Promise<void> {
   api.ui.dialog.replace(() => api.ui.DialogSelect<RemoteAction>({
@@ -257,29 +264,35 @@ async function revokeRemoteAccess(
     flat: true,
     skipFilter: true,
     options: [{ title: "Revoking remote access...", value: "status" }],
-  }))
+  }));
+  let serviceOrigin: URL;
   try {
-    const current = await authorizationStore.load()
+    const current = await authorizationStore.load();
     if (current?.credential !== authorization.credential || current.serviceOrigin !== authorization.serviceOrigin) {
-      throw new Error("The linked connector changed. Refresh and try again.")
+      throw new Error("The linked connector changed. Refresh and try again.");
     }
-    const serviceOrigin = validateServiceOrigin(authorization.serviceOrigin)
-    await new RemoteAPIClient(serviceOrigin).revokeConnector(authorization.credential, api.lifecycle.signal)
-    const latest = await authorizationStore.load()
-    if (latest?.credential !== authorization.credential || latest.serviceOrigin !== authorization.serviceOrigin) {
-      throw new Error("The linked connector changed during revocation")
-    }
-    // Retain the authorization until cleanup finishes so a lost response or filesystem failure can be retried.
-    await pairingStore.clear()
-    await new FileConnectorIdentityStore(resolveConnectorIdentityPath()).clear()
-    await authorizationStore.clear()
-    if (!api.lifecycle.signal.aborted) renderRemoteDialog(api, authorizationStore, pairingStore, { type: "revoked" })
+    serviceOrigin = validateServiceOrigin(authorization.serviceOrigin);
+    // Disable locally before contacting the server: an unreachable or misbehaving server must
+    // never be able to keep this device's local kill switch from taking effect. The credential
+    // is queued first so a retry can still tell the server after this device forgets it.
+    await revocationQueueStore.replace({ version: 1, serviceOrigin: serviceOrigin.origin, credential: authorization.credential });
+    await pairingStore.clear();
+    await new FileConnectorIdentityStore(resolveConnectorIdentityPath()).clear();
+    await authorizationStore.clear();
   } catch {
-    if (api.lifecycle.signal.aborted) return
-    renderRemoteDialog(api, authorizationStore, pairingStore, {
+    if (api.lifecycle.signal.aborted) return;
+    renderRemoteDialog(api, authorizationStore, pairingStore, revocationQueueStore, {
       type: "error",
       message: "Revocation could not be completed. Refresh and retry; local authorization has been retained.",
-    })
+    });
+    return;
+  }
+  if (!api.lifecycle.signal.aborted) renderRemoteDialog(api, authorizationStore, pairingStore, revocationQueueStore, { type: "revoked" });
+  try {
+    await new RemoteAPIClient(serviceOrigin).revokeConnector(authorization.credential, api.lifecycle.signal);
+    await revocationQueueStore.clear();
+  } catch {
+    // Left queued; the next plugin start retries telling the server.
   }
 }
 
@@ -287,20 +300,22 @@ function confirmRegeneration(
   api: TuiPluginApi,
   authorizationStore: FileConnectorAuthorizationStore,
   pairingStore: FileConnectorPairingStore,
+  revocationQueueStore: FileRevocationQueueStore,
   pairing: PendingConnectorPairing,
 ): void {
   api.ui.dialog.replace(() => api.ui.DialogConfirm({
     title: "Generate a new pairing code?",
     message: `The current code ${pairing.userCode} will stop working.`,
-    onCancel: () => { renderRemoteDialog(api, authorizationStore, pairingStore, { type: "pairing", pairing }); },
-    onConfirm: () => void regeneratePairing(api, authorizationStore, pairingStore, pairing),
-  }))
+    onCancel: () => { renderRemoteDialog(api, authorizationStore, pairingStore, revocationQueueStore, { type: "pairing", pairing }); },
+    onConfirm: () => void regeneratePairing(api, authorizationStore, pairingStore, revocationQueueStore, pairing),
+  }));
 }
 
 async function regeneratePairing(
   api: TuiPluginApi,
   authorizationStore: FileConnectorAuthorizationStore,
   pairingStore: FileConnectorPairingStore,
+  revocationQueueStore: FileRevocationQueueStore,
   pairing: PendingConnectorPairing,
 ): Promise<void> {
   api.ui.dialog.replace(() => api.ui.DialogSelect<RemoteAction>({
@@ -308,30 +323,30 @@ async function regeneratePairing(
     flat: true,
     skipFilter: true,
     options: [{ title: "Generating a new pairing code...", value: "status" }],
-  }))
+  }));
   try {
-    const serviceOrigin = validateServiceOrigin(pairing.serviceOrigin)
-    await new RemoteAPIClient(serviceOrigin).cancelPairing(pairing.pairingId, pairing.pairingSecret)
-    const deadline = Date.now() + 15_000
+    const serviceOrigin = validateServiceOrigin(pairing.serviceOrigin);
+    await new RemoteAPIClient(serviceOrigin).cancelPairing(pairing.pairingId, pairing.pairingSecret);
+    const deadline = Date.now() + 15_000;
     while (Date.now() < deadline && !api.lifecycle.signal.aborted) {
-      await delay(250, api.lifecycle.signal)
-      const status = await readRemoteStatus(authorizationStore, pairingStore)
+      await delay(250, api.lifecycle.signal);
+      const status = await readRemoteStatus(authorizationStore, pairingStore);
       if (status.type === "connected" || status.type === "error") {
-        renderRemoteDialog(api, authorizationStore, pairingStore, status)
-        return
+        renderRemoteDialog(api, authorizationStore, pairingStore, revocationQueueStore, status);
+        return;
       }
       if (status.type === "pairing" && status.pairing.pairingId !== pairing.pairingId) {
-        renderRemoteDialog(api, authorizationStore, pairingStore, status)
-        return
+        renderRemoteDialog(api, authorizationStore, pairingStore, revocationQueueStore, status);
+        return;
       }
     }
-    renderRemoteDialog(api, authorizationStore, pairingStore, { type: "waiting" })
+    renderRemoteDialog(api, authorizationStore, pairingStore, revocationQueueStore, { type: "waiting" });
   } catch (error) {
-    if (api.lifecycle.signal.aborted) return
-    renderRemoteDialog(api, authorizationStore, pairingStore, {
+    if (api.lifecycle.signal.aborted) return;
+    renderRemoteDialog(api, authorizationStore, pairingStore, revocationQueueStore, {
       type: "error",
       message: errorMessage(error),
-    })
+    });
   }
 }
 
