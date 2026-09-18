@@ -7,7 +7,7 @@ import { createProjectFixture, eventually } from "../support/opencode-project-fi
 
 // Characterization of the real pinned dependency, including unsafe behavior
 // the future remote adapter must reject. These are not authorization tests.
-test("OpenCode 1.18.30 project and session compatibility", async (t) => {
+test("OpenCode 1.18.31 project and session compatibility", async (t) => {
   const f = await createProjectFixture(t)
   const names = ["repo-a", "repo-b", "worktree", "plain-a", "plain-b"]
   const sessions = {}
@@ -23,7 +23,7 @@ test("OpenCode 1.18.30 project and session compatibility", async (t) => {
     sessions[name] = sdkData(await client.session.create({ body: { title: `Fixture ${name}` } }))
     assert.equal(sessions[name].directory, f.dirs[name])
     assert.equal(sessions[name].projectID, projects[name].id)
-    assert.equal(sessions[name].version, "1.18.30")
+    assert.equal(sessions[name].version, "1.18.31")
   }
 
   await t.test("directory activation initializes global and project-local plugins", async () => {

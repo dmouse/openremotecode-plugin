@@ -20,7 +20,7 @@ import {
   RELAY_PROTOCOL_VERSION,
 } from "@openremotecode/protocol"
 
-export const OPENCODE_VERSION = "1.18.30"
+export const OPENCODE_VERSION = "1.18.31"
 const run = promisify(execFile)
 const builtPlugin = fileURLToPath(new URL("../../dist/index.js", import.meta.url))
 
@@ -182,7 +182,7 @@ export async function createProjectFixture(t, options = {}) {
     const response = await fetch(`${origin}/global/health`, { signal: AbortSignal.timeout(500) })
     assert.equal(response.status, 200)
     const health = await response.json()
-    assert.equal(health.version, OPENCODE_VERSION, "Set OPENCODE_TEST_BINARY to OpenCode 1.18.30")
+    assert.equal(health.version, OPENCODE_VERSION, `Set OPENCODE_TEST_BINARY to OpenCode ${OPENCODE_VERSION}`)
     assert.equal(health.healthy, true)
   })
   let sequence = 0

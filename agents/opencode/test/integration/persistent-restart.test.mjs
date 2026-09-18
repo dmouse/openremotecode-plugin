@@ -13,7 +13,7 @@ import { WebSocketServer } from "ws"
 
 import { connectorHelloSchema, generateConnectorIdentity } from "@openremotecode/protocol"
 
-const EXPECTED_OPENCODE_VERSION = "1.18.30"
+const EXPECTED_OPENCODE_VERSION = "1.18.31"
 const opencodeBinary = process.env.OPENCODE_TEST_BINARY || "opencode"
 const pluginRoot = fileURLToPath(new URL("../../", import.meta.url))
 const builtPlugin = path.join(pluginRoot, "dist", "index.js")
@@ -132,7 +132,7 @@ async function createAuthenticatedRelay(expectedCredential) {
     socket.once("message", (data) => {
       const hello = JSON.parse(data.toString())
       socket.send(JSON.stringify({
-        protocolVersion: 1,
+        protocolVersion: 2,
         type: "relay.ready",
         role: "connector",
         keyId: hello.identity.keyId,

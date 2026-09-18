@@ -79,7 +79,7 @@ test("/remote revokes via HTTP and stops the running plugin relay without a rest
   const [socket] = await connected
   const [hello] = await once(socket, "message", { signal: AbortSignal.timeout(3000) })
   assert.equal(JSON.parse(hello.toString()).identity.keyId, identity.publicIdentity.keyId)
-  socket.send(JSON.stringify({ protocolVersion: 1, type: "relay.ready", role: "connector", keyId: identity.publicIdentity.keyId }))
+  socket.send(JSON.stringify({ protocolVersion: 2, type: "relay.ready", role: "connector", keyId: identity.publicIdentity.keyId }))
   const closed = once(socket, "close", { signal: AbortSignal.timeout(3000) })
   let command, dialog
   const controller = new AbortController()

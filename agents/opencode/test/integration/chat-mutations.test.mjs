@@ -3,7 +3,7 @@ import test from "node:test"
 import { chatResponses } from "@openremotecode/protocol"
 import { createProjectFixture, eventually } from "../support/opencode-project-fixture.mjs"
 
-test("OpenCode 1.18.30 encrypted rename/fork preserves full history and root-only visibility", async (t) => {
+test("OpenCode 1.18.31 encrypted rename/fork preserves full history and root-only visibility", async (t) => {
   const f = await createProjectFixture(t)
   const directory = f.dirs["repo-a"]
   const client = f.client(directory)

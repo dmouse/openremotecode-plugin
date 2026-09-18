@@ -56,7 +56,7 @@ test("TLS transports reject redirects and require certificate verification", asy
     assert.equal(request.headers["sec-websocket-protocol"].includes("ticket.ort_transport_test"), true)
     socket.once("message", (data) => {
       const hello = JSON.parse(data.toString())
-      socket.send(JSON.stringify({ protocolVersion: 1, type: "relay.ready", role: "connector", keyId: hello.identity.keyId }))
+      socket.send(JSON.stringify({ protocolVersion: 2, type: "relay.ready", role: "connector", keyId: hello.identity.keyId }))
     })
   })
   t.after(async () => {

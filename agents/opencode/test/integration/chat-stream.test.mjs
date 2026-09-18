@@ -102,7 +102,7 @@ test("native running output and completion arrive as encrypted activity updates 
   assert.equal((await f.remoteRequest(connection, "chat.stream.unsubscribe", stop)).body.unsubscribed, true)
 })
 
-for (const engine of ["legacy", "next"]) test(`1.18.30 ${engine} provider reasoning and text stream before generation completes`, async (t) => {
+for (const engine of ["legacy", "next"]) test(`1.18.31 ${engine} provider reasoning and text stream before generation completes`, async (t) => {
   let finished = false
   let firstChunkAt = 0, firstThinkingLatency
   const provider = createServer(async (request, response) => {
