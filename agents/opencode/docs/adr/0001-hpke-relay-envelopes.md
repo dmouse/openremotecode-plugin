@@ -20,7 +20,7 @@ Relay payloads use HPKE authenticated mode as defined by RFC 9180 with:
 - One fresh HPKE sender context per envelope.
 - The sender's connector or device private key as the authenticated sender key.
 - The recipient's pinned public key as the encryption target.
-- Protocol identity, message identifier, sender and recipient key identifiers, sequence, expiry, and suite identifier as additional authenticated data.
+- Protocol identity, message identifier, sender and recipient key identifiers, connection epoch, sequence, expiry, and suite identifier as additional authenticated data.
 
 The implementation currently uses `@hpke/core`. The package relies on Web Crypto, supports HPKE Auth mode, and is tested by its maintainers against RFC 9180 and Project Wycheproof vectors. Its maintainers state that it has not been formally audited, so this choice remains provisional.
 
@@ -36,6 +36,6 @@ The file store is a fallback boundary. Native operating-system key storage shoul
 - A recipient verifies the expected sender key as part of HPKE context setup.
 - Metadata modification causes authenticated decryption failure.
 - Static recipient-key compromise can expose previously captured envelopes, so this design does not provide full post-compromise forward secrecy.
-- Device revocation and replay tracking remain protocol responsibilities outside HPKE.
+- Device revocation and replay tracking remain protocol responsibilities outside HPKE. Replay is handled by the connection epoch and per-epoch sequence window defined in [server ADR 0011](../../../../../server/docs/adr/0011-relay-connection-epochs.md); binding the epoch into the additional authenticated data is what makes an envelope undecryptable outside the connection it was sealed in.
 - Every browser and Expo target must pass shared interoperability vectors before release.
 - The implementation must be replaced or independently reviewed if its maintenance, runtime support, or security posture becomes unsuitable.

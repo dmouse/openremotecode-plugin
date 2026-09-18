@@ -24,13 +24,14 @@ test("non-exportable identities retain HPKE Auth interoperability", async () => 
     sender,
     recipient: recipient.publicIdentity,
     payload: {
-      protocolVersion: 1,
+      protocolVersion: 2,
       kind: "request",
       requestId: crypto.randomUUID(),
       sentAt: 1_788_115_200_000,
       operation: "session.list",
       body: {},
     },
+    epoch: "e".repeat(43),
     sequence: 0,
     now: 1_788_115_200_000,
   })
@@ -38,6 +39,7 @@ test("non-exportable identities retain HPKE Auth interoperability", async () => 
     recipient,
     sender: sender.publicIdentity,
     envelope,
+    epoch: "e".repeat(43),
     now: 1_788_115_200_000,
   })
   assert.equal(payload.operation, "session.list")

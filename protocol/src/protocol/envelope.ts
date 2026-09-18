@@ -1,14 +1,15 @@
-import { z } from "zod"
+import { z } from "zod";
 
 import {
   HPKE_SUITE_ID,
   MAX_CIPHERTEXT_LENGTH,
   RELAY_PROTOCOL_VERSION,
-} from "./constants.js"
+} from "./constants.js";
+import { relayEpochSchema } from "./epoch.js";
 
-const keyIdSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/u)
-const base64UrlSchema = z.string().regex(/^[A-Za-z0-9_-]+$/u)
-const timestampSchema = z.number().int().nonnegative()
+const keyIdSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);
+const base64UrlSchema = z.string().regex(/^[A-Za-z0-9_-]+$/u);
+const timestampSchema = z.number().int().nonnegative();
 
 export const relayPayloadSchema = z
   .object({
@@ -23,7 +24,7 @@ export const relayPayloadSchema = z
       .regex(/^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)*$/u),
     body: z.json(),
   })
-  .strict()
+  .strict();
 
 export const encryptedRelayEnvelopeSchema = z
   .object({
@@ -32,13 +33,14 @@ export const encryptedRelayEnvelopeSchema = z
     messageId: z.uuid(),
     senderKeyId: keyIdSchema,
     recipientKeyId: keyIdSchema,
+    epoch: relayEpochSchema,
     sequence: z.number().int().nonnegative(),
     expiresAt: timestampSchema,
     suite: z.literal(HPKE_SUITE_ID),
     encapsulatedKey: base64UrlSchema.max(256),
     ciphertext: base64UrlSchema.max(MAX_CIPHERTEXT_LENGTH),
   })
-  .strict()
+  .strict();
 
 export type RelayPayload = z.infer<typeof relayPayloadSchema>
 export type EncryptedRelayEnvelope = z.infer<
@@ -53,6 +55,7 @@ export function envelopeAdditionalData(
     | "messageId"
     | "senderKeyId"
     | "recipientKeyId"
+    | "epoch"
     | "sequence"
     | "expiresAt"
     | "suite"
@@ -66,23 +69,24 @@ export function envelopeAdditionalData(
       envelope.messageId,
       envelope.senderKeyId,
       envelope.recipientKeyId,
+      envelope.epoch,
       envelope.sequence,
       envelope.expiresAt,
       envelope.suite,
     ]),
-  )
+  );
 }
 
 export function encodeRelayPayload(payload: RelayPayload): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify(relayPayloadSchema.parse(payload)))
+  return new TextEncoder().encode(JSON.stringify(relayPayloadSchema.parse(payload)));
 }
 
 export function decodeRelayPayload(bytes: ArrayBufferLike): RelayPayload {
-  let parsed: unknown
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   } catch {
-    throw new Error("Decrypted relay payload is not valid JSON")
+    throw new Error("Decrypted relay payload is not valid JSON");
   }
-  return relayPayloadSchema.parse(parsed)
+  return relayPayloadSchema.parse(parsed);
 }

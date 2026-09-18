@@ -13,8 +13,11 @@ import { createOpencodeClient } from "@opencode-ai/sdk/client"
 import { WebSocketServer } from "ws"
 import {
   decryptRelayEnvelope,
+  deriveRelayEpoch,
   encryptRelayPayload,
   generateConnectorIdentity,
+  generateRelayNonce,
+  RELAY_PROTOCOL_VERSION,
 } from "@openremotecode/protocol"
 
 export const OPENCODE_VERSION = "1.18.30"
@@ -135,7 +138,24 @@ export async function createProjectFixture(t, options = {}) {
   await once(relay, "listening")
   const connections = []
   relay.on("connection", (socket) => {
-    socket.once("message", (data) => connections.push({ socket, hello: JSON.parse(data.toString()) }))
+    socket.once("message", (data) => {
+      const hello = JSON.parse(data.toString())
+      const clientNonce = generateRelayNonce()
+      void deriveRelayEpoch({
+        connectorKeyId: hello.identity.keyId,
+        connectorNonce: hello.nonce,
+        clientKeyId: clientIdentity.identity.publicIdentity.keyId,
+        clientNonce,
+      }).then((epoch) => {
+        socket.send(JSON.stringify({
+          protocolVersion: RELAY_PROTOCOL_VERSION,
+          type: "client.hello",
+          identity: clientIdentity.identity.publicIdentity,
+          nonce: clientNonce,
+        }))
+        connections.push({ socket, hello, epoch })
+      })
+    })
   })
   env.OPENCODE_REMOTE_ALLOW_INSECURE_LOOPBACK = "true"
   env.OPENCODE_REMOTE_RELAY_URL = `ws://127.0.0.1:${relay.address().port}`
@@ -197,8 +217,9 @@ export async function createProjectFixture(t, options = {}) {
       const request = await encryptRelayPayload({
         sender: clientIdentity.identity,
         recipient: connection.hello.identity,
-        payload: { protocolVersion: 1, kind: "request", requestId,
+        payload: { protocolVersion: RELAY_PROTOCOL_VERSION, kind: "request", requestId,
           sentAt: Date.now(), operation, body },
+        epoch: connection.epoch,
         sequence: sequence++,
       })
       const response = remotePayload(connection, clientIdentity.identity, (payload) =>
@@ -223,7 +244,7 @@ function remotePayload(connection, recipient, accept) {
     const closed = () => finish(new Error("Fixture relay closed"))
     const message = (data) => {
       void decryptRelayEnvelope({ recipient, sender: connection.hello.identity,
-        envelope: JSON.parse(data.toString()) }).then((payload) => {
+        envelope: JSON.parse(data.toString()), epoch: connection.epoch }).then((payload) => {
         if (accept(payload)) finish(undefined, payload)
       }, (error) => finish(error))
     }

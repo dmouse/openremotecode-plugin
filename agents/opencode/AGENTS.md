@@ -101,6 +101,12 @@ A connector has a persistent identity. Each active plugin process advertises an 
 - Use bounded command and event queues.
 - Limit decrypted command size before detailed processing.
 - Reject stale, replayed, unsupported, or incorrectly addressed messages.
+- Scope replay state to the connection epoch, never across one. Each connection derives an
+  epoch from both peers' hello nonces; outgoing sequence numbers restart at zero with it
+  and the inbound sequence window is recreated with it. The mutation journal is the
+  deliberate exception: it is keyed by request identifier and must survive a reconnect, so
+  a client retrying after an uncertain outcome receives its first result rather than a
+  second execution. See [server ADR 0011](../../../server/docs/adr/0011-relay-connection-epochs.md).
 - Apply timeouts and cancellation to SDK operations where supported.
 - Keep networking and cryptography off latency-sensitive event-hook paths.
 - Surface connector status without repeatedly notifying or disrupting the developer.

@@ -8,6 +8,7 @@ import {
 } from "@openremotecode/protocol"
 
 const NOW = 1_788_115_200_000
+const TEST_EPOCH = "e".repeat(43)
 
 test("HPKE Auth encrypts a relay payload for the intended recipient", async () => {
   const sender = await generateConnectorIdentity(NOW)
@@ -18,6 +19,7 @@ test("HPKE Auth encrypts a relay payload for the intended recipient", async () =
     sender: sender.identity,
     recipient: recipient.identity.publicIdentity,
     payload,
+    epoch: TEST_EPOCH,
     sequence: 7,
     now: NOW,
   })
@@ -31,6 +33,7 @@ test("HPKE Auth encrypts a relay payload for the intended recipient", async () =
     recipient: recipient.identity,
     sender: sender.identity.publicIdentity,
     envelope,
+    epoch: TEST_EPOCH,
     now: NOW,
   })
   assert.deepEqual(decrypted, payload)
@@ -43,6 +46,7 @@ test("authenticated outer metadata cannot be modified", async () => {
     sender: sender.identity,
     recipient: recipient.identity.publicIdentity,
     payload: createPayload({ text: "tamper test" }),
+    epoch: TEST_EPOCH,
     sequence: 1,
     now: NOW,
   })
@@ -56,6 +60,7 @@ test("authenticated outer metadata cannot be modified", async () => {
       recipient: recipient.identity,
       sender: sender.identity.publicIdentity,
       envelope: modified,
+      epoch: TEST_EPOCH,
       now: NOW,
     }),
   )
@@ -69,6 +74,7 @@ test("a different authenticated sender cannot decrypt as the trusted sender", as
     sender: sender.identity,
     recipient: recipient.identity.publicIdentity,
     payload: createPayload({ text: "sender authentication" }),
+    epoch: TEST_EPOCH,
     sequence: 2,
     now: NOW,
   })
@@ -82,6 +88,7 @@ test("a different authenticated sender cannot decrypt as the trusted sender", as
       recipient: recipient.identity,
       sender: attacker.identity.publicIdentity,
       envelope: relabeled,
+      epoch: TEST_EPOCH,
       now: NOW,
     }),
   )
@@ -94,6 +101,7 @@ test("expired envelopes are rejected before plaintext is returned", async () => 
     sender: sender.identity,
     recipient: recipient.identity.publicIdentity,
     payload: createPayload({ text: "expired" }),
+    epoch: TEST_EPOCH,
     sequence: 3,
     now: NOW,
     ttlMs: 1_000,
@@ -104,6 +112,7 @@ test("expired envelopes are rejected before plaintext is returned", async () => 
       recipient: recipient.identity,
       sender: sender.identity.publicIdentity,
       envelope,
+      epoch: TEST_EPOCH,
       now: NOW + 1_000,
     }),
     /expired/u,
@@ -122,6 +131,7 @@ test("invalid inner operations fail schema validation before encryption", async 
         ...createPayload({}),
         operation: "shell execute",
       },
+      epoch: TEST_EPOCH,
       sequence: 4,
       now: NOW,
     }),
@@ -130,7 +140,7 @@ test("invalid inner operations fail schema validation before encryption", async 
 
 function createPayload(body) {
   return {
-    protocolVersion: 1,
+    protocolVersion: 2,
     kind: "request",
     requestId: crypto.randomUUID(),
     sentAt: NOW,

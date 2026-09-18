@@ -25,7 +25,10 @@ import {
   CHAT_STREAM_CAPABILITIES,
   decryptRelayEnvelope,
   encryptRelayPayload,
+  deriveRelayEpoch,
   generateConnectorIdentity,
+  generateRelayNonce,
+  RELAY_PROTOCOL_VERSION,
   sessionListResponseBodySchema,
 } from "@openremotecode/protocol"
 
@@ -121,7 +124,7 @@ test("real OpenCode serves an encrypted session.list through the plugin", async 
     await waitForSdkLog(() => output, opencode)
     const message = connectorHelloSchema.parse(connection.message)
 
-    assert.equal(message.protocolVersion, 1)
+    assert.equal(message.protocolVersion, RELAY_PROTOCOL_VERSION)
     assert.equal(message.type, "connector.hello")
     assert.equal(message.pluginVersion, "0.1.0")
     assert.deepEqual(message.capabilities, ["session.list", ...CHAT_CAPABILITIES, ...PROJECT_MCP_CAPABILITIES, ...CHAT_STREAM_CAPABILITIES])
@@ -140,6 +143,20 @@ test("real OpenCode serves an encrypted session.list through the plugin", async 
       assert.equal(identityFile.mode & 0o777, 0o600)
     }
 
+    const clientNonce = generateRelayNonce()
+    const epoch = await deriveRelayEpoch({
+      connectorKeyId: message.identity.keyId,
+      connectorNonce: message.nonce,
+      clientKeyId: client.identity.publicIdentity.keyId,
+      clientNonce,
+    })
+    connection.socket.send(JSON.stringify({
+      protocolVersion: RELAY_PROTOCOL_VERSION,
+      type: "client.hello",
+      identity: client.identity.publicIdentity,
+      nonce: clientNonce,
+    }))
+
     const sessionTitle = `Encrypted integration ${crypto.randomUUID()}`
     await createOpenCodeSession(opencodePort, workspace, sessionTitle)
     const expectedSessions = await listOpenCodeSessions(opencodePort, workspace)
@@ -148,13 +165,14 @@ test("real OpenCode serves an encrypted session.list through the plugin", async 
       sender: client.identity,
       recipient: message.identity,
       payload: {
-        protocolVersion: 1,
+        protocolVersion: RELAY_PROTOCOL_VERSION,
         kind: "request",
         requestId: crypto.randomUUID(),
         sentAt: Date.now(),
         operation: "session.list",
         body: {},
       },
+      epoch,
       sequence: 0,
     })
     const serializedRequest = JSON.stringify(request)
@@ -173,6 +191,7 @@ test("real OpenCode serves an encrypted session.list through the plugin", async 
       recipient: client.identity,
       sender: message.identity,
       envelope: JSON.parse(serializedResponse),
+      epoch,
     })
     assert.equal(responsePayload.kind, "response")
     assert.equal(responsePayload.operation, "session.list")

@@ -28,6 +28,14 @@ export {
   type RelayPayload,
 } from "./protocol/envelope.js";
 export {
+  deriveRelayEpoch,
+  generateRelayNonce,
+  relayEpochSchema,
+  relayNonceSchema,
+  type RelayEpochInput,
+} from "./protocol/epoch.js";
+export { ReplayWindow } from "./protocol/replay-window.js";
+export {
   clientHelloSchema,
   clientOfflineSchema,
   connectorHelloSchema,

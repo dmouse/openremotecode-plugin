@@ -48,7 +48,7 @@ test("authenticated reconnect acquires a new single-use ticket", async () => {
       }
     },
     hello: {
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "connector.hello",
       pluginVersion: "test",
       identity: connector.identity.publicIdentity,
@@ -62,7 +62,7 @@ test("authenticated reconnect acquires a new single-use ticket", async () => {
     await waitFor(() => sockets.length === 1)
     await waitFor(() => sockets[0].sent.length === 1)
     sockets[0].receive({
-      protocolVersion: 1,
+      protocolVersion: 2,
       type: "relay.ready",
       role: "connector",
       keyId: connector.identity.publicIdentity.keyId,
@@ -105,17 +105,22 @@ async function senderFixture(t, authenticated = false, options = {}) {
     send(value) { this.sent.push(value) }
     receive(value) { this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(value) })) }
     close(code) {
+      // Real WebSocket clients only accept 1000 or 3000-4999; anything else throws
+      // InvalidAccessError, so a fake that swallows every code hides a broken close path.
+      if (code !== undefined && code !== 1000 && (code < 3000 || code > 4999)) {
+        throw new DOMException(`invalid code ${String(code)}`, "InvalidAccessError")
+      }
       if (this.readyState === 3) return
       this.closeCode = code; this.readyState = 3; this.dispatchEvent(new Event("close"))
     }
   }
   globalThis.WebSocket = FakeWebSocket
   const connector = await generateConnectorIdentity()
-  const ready = { protocolVersion: 1, type: "relay.ready", role: "connector", keyId: connector.identity.publicIdentity.keyId }
+  const ready = { protocolVersion: 2, type: "relay.ready", role: "connector", keyId: connector.identity.publicIdentity.keyId }
   const relay = new RelayConnection({
     ...(authenticated ? { admissionProvider: async () => ({ url: new URL("wss://relay.example.test/v1/relay"),
       protocols: [], expiresAt: Date.now() + 30_000 }) } : { url: new URL("ws://127.0.0.1:1234") }),
-    hello: { protocolVersion: 1, type: "connector.hello", pluginVersion: "test", identity: connector.identity.publicIdentity,
+    hello: { protocolVersion: 2, type: "connector.hello", pluginVersion: "test", identity: connector.identity.publicIdentity,
       capabilities: ["project.mcp.snapshot", "project.mcp.subscribe", "project.mcp.unsubscribe", "project.mcp.updated"] },
     log: async () => {},
     handleMessage: (message) => state.handle(message),
@@ -157,7 +162,7 @@ test("outgoing saturation disconnects instead of buffering unbounded unsolicited
   f.sockets[0].receive(f.ready)
   f.sockets[0].bufferedAmount = 1_999_999
   assert.equal(f.senders[0]({ opaque: "event" }), false)
-  assert.equal(f.sockets[0].closeCode, 1013)
+  assert.equal(f.sockets[0].closeCode, 4013)
   assert.equal(f.sockets[0].sent.length, 1)
   assert.equal(f.state.disconnected, 1)
   await waitFor(() => f.sockets[1]?.sent.length === 1, 1000)
@@ -165,7 +170,7 @@ test("outgoing saturation disconnects instead of buffering unbounded unsolicited
   f.state.handle = async () => ({ opaque: "reply" })
   f.sockets[1].bufferedAmount = 1_999_999
   f.sockets[1].receive({ request: true })
-  await waitFor(() => f.sockets[1].closeCode === 1013)
+  await waitFor(() => f.sockets[1].closeCode === 4013)
   assert.equal(f.state.disconnected, 2)
   assert.equal(f.sockets[1].sent.length, 1)
 })
@@ -176,7 +181,7 @@ test("a single oversize outgoing frame closes before send even with an empty soc
   assert.equal(f.senders[0]({ opaque: "x".repeat(2_000_000) }), false)
   assert.equal(f.sockets[0].sent.length, 1)
   assert.equal(f.state.disconnected, 1)
-  assert.equal(f.sockets[0].closeCode, 1013)
+  assert.equal(f.sockets[0].closeCode, 4013)
 })
 
 test("client presence frames update onPresence and never reach the message handler", async (t) => {
@@ -186,11 +191,11 @@ test("client presence frames update onPresence and never reach the message handl
   f.state.handle = () => { throw new Error("presence frames must not reach the dispatcher") }
 
   const client = await generateConnectorIdentity()
-  f.sockets[0].receive({ protocolVersion: 1, type: "client.hello", identity: client.identity.publicIdentity })
+  f.sockets[0].receive({ protocolVersion: 2, type: "client.hello", identity: client.identity.publicIdentity, nonce: "n".repeat(22) })
   await waitFor(() => presence.length === 1)
   assert.deepEqual(presence, [true])
 
-  f.sockets[0].receive({ protocolVersion: 1, type: "client.offline", keyId: client.identity.publicIdentity.keyId })
+  f.sockets[0].receive({ protocolVersion: 2, type: "client.offline", keyId: client.identity.publicIdentity.keyId })
   await waitFor(() => presence.length === 2)
   assert.deepEqual(presence, [true, false])
 })
@@ -200,10 +205,53 @@ test("losing admission reports the client as no longer connected", async (t) => 
   const f = await senderFixture(t, true, { onPresence: (connected) => presence.push(connected) })
   f.sockets[0].receive(f.ready)
   const client = await generateConnectorIdentity()
-  f.sockets[0].receive({ protocolVersion: 1, type: "client.hello", identity: client.identity.publicIdentity })
+  f.sockets[0].receive({ protocolVersion: 2, type: "client.hello", identity: client.identity.publicIdentity, nonce: "n".repeat(22) })
   await waitFor(() => presence.length === 1)
 
   f.sockets[0].close(1000)
   await waitFor(() => presence.length === 2)
   assert.deepEqual(presence, [true, false])
+})
+
+test("a lease nearing expiry is renewed on a second connection that hands off without reconnecting", async (t) => {
+  const f = await senderFixture(t, true)
+  f.sockets[0].receive({ ...f.ready, authorizationExpiresAt: new Date(Date.now() + 2_000).toISOString() })
+  assert.equal(f.senders[0]({ opaque: "before renewal" }), true)
+
+  // The renewal margin (45s) exceeds this lease's remaining lifetime, so the renewal delay
+  // floors at its minimum and a second connection opens well ahead of the 2s expiry above.
+  await waitFor(() => f.sockets.length === 2, 3_000)
+  assert.equal(f.sockets[0].readyState, 1, "the live connection must stay open while renewal is in flight")
+  assert.equal(f.senders.length, 1, "no new sender until the renewal actually completes")
+
+  f.sockets[1].receive({ ...f.ready, authorizationExpiresAt: new Date(Date.now() + 300_000).toISOString() })
+  await waitFor(() => f.senders.length === 2)
+
+  assert.equal(f.sockets[0].readyState, 3, "the superseded connection is closed once the renewal takes over")
+  assert.equal(f.state.disconnected, 1, "the old onReady subscription is torn down exactly once")
+  assert.equal(f.senders[0]({ opaque: "stale" }), false)
+  assert.equal(f.senders[1]({ opaque: "fresh" }), true)
+
+  // The superseded connection's own close must not be treated as an unexpected drop: it must
+  // not schedule a reactive reconnect (a third connection appearing here would mean it did).
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  assert.equal(f.sockets.length, 2)
+})
+
+test("a renewal connection that fails before completing leaves the live connection untouched", async (t) => {
+  const f = await senderFixture(t, true)
+  f.sockets[0].receive({ ...f.ready, authorizationExpiresAt: new Date(Date.now() + 2_000).toISOString() })
+  assert.equal(f.senders[0]({ opaque: "before renewal" }), true)
+
+  await waitFor(() => f.sockets.length === 2, 3_000)
+  f.sockets[1].close(1000)
+
+  // The failed renewal attempt is abandoned rather than retried immediately; the live
+  // connection and its sender are unaffected.
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  assert.equal(f.sockets.length, 2)
+  assert.equal(f.sockets[0].readyState, 1)
+  assert.equal(f.state.disconnected, 0)
+  assert.equal(f.senders.length, 1)
+  assert.equal(f.senders[0]({ opaque: "still live" }), true)
 })

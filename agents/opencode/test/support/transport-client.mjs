@@ -26,7 +26,7 @@ if (mode === "redirect") {
   const timeout = setTimeout(() => failed(new Error("WSS admission timed out")), 3000)
   const relay = new RelayConnection({
     admissionProvider: (signal) => api.relayAdmission("synthetic-credential", signal),
-    hello: { protocolVersion: 1, type: "connector.hello", pluginVersion: "test", identity, capabilities: [] },
+    hello: { protocolVersion: 2, type: "connector.hello", pluginVersion: "test", identity, capabilities: [] },
     log: async (level, message) => {
       if (message === "Connected to authenticated remote relay") connected()
       else if (level === "error" || level === "warn") failed(new Error(message))

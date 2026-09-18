@@ -60,7 +60,7 @@ test("updates require safe nonnegative revisions and envelope requestId equals s
   for (const revision of [0, 1, Number.MAX_SAFE_INTEGER]) {
     assert.equal(projectMcpUpdatedSchema.safeParse({ ...fixture.update, revision }).success, true)
   }
-  const event = { protocolVersion: 1, kind: "event", operation: "project.mcp.updated",
+  const event = { protocolVersion: 2, kind: "event", operation: "project.mcp.updated",
     requestId: fixture.update.subscriptionId, sentAt: 1, body: fixture.update }
   assert.deepEqual(projectMcpUpdatedEventSchema.parse(event), event)
   for (const override of [{ kind: "response" }, { requestId: fixture.update.projectId }, { operation: "project.mcp.subscribe" }, { raw: {} }]) {

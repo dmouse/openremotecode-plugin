@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "domain": "opencode-remote-relay-epoch",
+  "cases": [
+    {
+      "connectorKeyId": "ccccccccccccccccccccccccccccccccccccccccccc",
+      "connectorNonce": "nnnnnnnnnnnnnnnnnnnnnn",
+      "clientKeyId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "clientNonce": "mmmmmmmmmmmmmmmmmmmmmm",
+      "epoch": "9eSzDKgjJTOZwYyjPS2UugYBz5insicKrM1t2vGjFGg"
+    },
+    {
+      "connectorKeyId": "AbC-_012345678901234567890123456789012345678",
+      "connectorNonce": "aB-_0123456789012345_9",
+      "clientKeyId": "zZ9-_012345678901234567890123456789012345678",
+      "clientNonce": "Zz9-_012345678901234_1",
+      "epoch": "Sq43SGmtwBC1pozXBM8M-q0OHq8aylCyHeKP8Cd4POU"
+    }
+  ]
+}

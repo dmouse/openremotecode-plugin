@@ -1,7 +1,8 @@
-import { z } from "zod"
+import { z } from "zod";
 
-import { connectorPublicIdentitySchema } from "../crypto/connector-identity.js"
-import { RELAY_PROTOCOL_VERSION } from "./constants.js"
+import { connectorPublicIdentitySchema } from "../crypto/connector-identity.js";
+import { RELAY_PROTOCOL_VERSION } from "./constants.js";
+import { relayNonceSchema } from "./epoch.js";
 
 export const connectorHelloSchema = z
   .object({
@@ -9,17 +10,19 @@ export const connectorHelloSchema = z
     type: z.literal("connector.hello"),
     pluginVersion: z.string().min(1).max(32),
     identity: connectorPublicIdentitySchema,
+    nonce: relayNonceSchema,
     capabilities: z.array(z.string().min(1).max(64)).max(64),
   })
-  .strict()
+  .strict();
 
 export const clientHelloSchema = z
   .object({
     protocolVersion: z.literal(RELAY_PROTOCOL_VERSION),
     type: z.literal("client.hello"),
     identity: connectorPublicIdentitySchema,
+    nonce: relayNonceSchema,
   })
-  .strict()
+  .strict();
 
 export const connectorOfflineSchema = z
   .object({
@@ -27,7 +30,7 @@ export const connectorOfflineSchema = z
     type: z.literal("connector.offline"),
     keyId: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
   })
-  .strict()
+  .strict();
 
 export const clientOfflineSchema = z
   .object({
@@ -35,7 +38,7 @@ export const clientOfflineSchema = z
     type: z.literal("client.offline"),
     keyId: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
   })
-  .strict()
+  .strict();
 
 export const relayReadySchema = z
   .object({
@@ -43,8 +46,13 @@ export const relayReadySchema = z
     type: z.literal("relay.ready"),
     role: z.enum(["client", "connector"]),
     keyId: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
+    // When present, an authenticated peer can renew its admission ahead of
+    // this instant instead of waiting to be disconnected at it. Optional so
+    // a peer built before this field existed keeps parsing a relay from a
+    // server that already sends it.
+    authorizationExpiresAt: z.string().min(1).optional(),
   })
-  .strict()
+  .strict();
 
 export type ConnectorHello = z.infer<typeof connectorHelloSchema>
 export type ClientHello = z.infer<typeof clientHelloSchema>
