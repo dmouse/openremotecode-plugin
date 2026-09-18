@@ -96,7 +96,7 @@ export class PairingClient {
         throw new Error("Completed pairing response omitted authorization material");
       }
       const authorization: ConnectorAuthorization = {
-        version: 1,
+        version: 2,
         serviceOrigin: this.api.serviceOrigin.origin,
         connectorId: state.connectorId,
         connectorKeyId: this.identity.publicIdentity.keyId,

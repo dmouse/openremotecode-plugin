@@ -28,6 +28,15 @@ export {
   type RelayPayload,
 } from "./protocol/envelope.js";
 export {
+  CONNECTOR_CREDENTIAL_CAPABILITIES,
+  CONNECTOR_CREDENTIAL_UPDATED_OPERATION,
+  CONNECTOR_CREDENTIAL_VERSION,
+  connectorCredentialUpdatedEventSchema,
+  connectorCredentialUpdatedSchema,
+  type ConnectorCredentialOutcome,
+  type ConnectorCredentialUpdated,
+} from "./protocol/connector-credential.js";
+export {
   deriveRelayEpoch,
   generateRelayNonce,
   relayEpochSchema,

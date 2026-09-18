@@ -101,6 +101,12 @@ A connector has a persistent identity. Each active plugin process advertises an 
 - Use bounded command and event queues.
 - Limit decrypted command size before detailed processing.
 - Reject stale, replayed, unsupported, or incorrectly addressed messages.
+- Renew the connector credential only after relay admission has succeeded, and keep the
+  renewal single-flight. Presenting the current credential cancels a pending rotation
+  server-side, so a rotation started before admission cancels itself on every attempt and the
+  credential silently reaches expiry. Write the replacement to the authorization file before
+  activating it: activation retires the previous credential, and a credential activated but
+  never recorded is a lockout. See [server ADR 0012](../../../server/docs/adr/0012-connector-credential-rotation.md).
 - Scope replay state to the connection epoch, never across one. Each connection derives an
   epoch from both peers' hello nonces; outgoing sequence numbers restart at zero with it
   and the inbound sequence window is recreated with it. The mutation journal is the

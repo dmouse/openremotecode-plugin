@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { chmod, mkdtemp, readFile, rm } from "node:fs/promises"
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
@@ -41,9 +41,64 @@ test("connector authorization is atomically replaced and permission restricted",
   }
 })
 
+test("an authorization written before rotation upgrades in place", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "opencode-remote-authorization-v1-"))
+  try {
+    const filePath = path.join(directory, "connector-authorization.json")
+    const store = new FileConnectorAuthorizationStore(filePath)
+    const client = await generateConnectorIdentity()
+    const existing = { ...authorization(client.identity.publicIdentity, "A".repeat(43)), version: 1 }
+
+    // A file left by an earlier plugin version must keep working: rejecting it here would
+    // force every paired connector through the safety-code ceremony again.
+    await writeFile(filePath, `${JSON.stringify(existing, null, 2)}\n`, { mode: 0o600 })
+    const loaded = await store.load()
+    assert.equal(loaded.version, 2)
+    assert.equal(loaded.credential, existing.credential)
+    assert.equal(loaded.pending, undefined)
+    assert.deepEqual({ ...loaded, version: 1 }, existing)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("a pending credential round-trips and is validated", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "opencode-remote-authorization-pending-"))
+  try {
+    const filePath = path.join(directory, "connector-authorization.json")
+    const store = new FileConnectorAuthorizationStore(filePath)
+    const client = await generateConnectorIdentity()
+    const base = authorization(client.identity.publicIdentity, "A".repeat(43))
+    const staged = {
+      ...base,
+      pending: { credential: `orc_${"N".repeat(43)}`, activateBy: "2026-09-14T12:15:00.000Z" },
+    }
+
+    await store.replace(staged)
+    assert.deepEqual(await store.load(), staged)
+
+    // Both credentials are on disk at once, which is what survives a crash mid-rotation.
+    const contents = await readFile(filePath, "utf8")
+    assert.equal(contents.includes(base.credential) && contents.includes(staged.pending.credential), true)
+
+    for (const pending of [
+      null,
+      {},
+      { credential: `orc_${"N".repeat(43)}` },
+      { credential: "not-a-credential", activateBy: "2026-09-14T12:15:00.000Z" },
+      { credential: `orc_${"N".repeat(43)}`, activateBy: "nonsense" },
+      { credential: `orc_${"N".repeat(43)}`, activateBy: "2026-09-14T12:15:00.000Z", extra: true },
+    ]) {
+      await assert.rejects(store.replace({ ...base, pending }), /[Pp]ending/u)
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
 function authorization(trustedClient, tokenBody) {
   return {
-    version: 1,
+    version: 2,
     serviceOrigin: "https://remote.example.test",
     connectorId: "con_0123456789abcdefghijklmn",
     connectorKeyId: "c".repeat(43),

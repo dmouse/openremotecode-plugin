@@ -23,6 +23,7 @@ import {
   CHAT_CAPABILITIES,
   PROJECT_MCP_CAPABILITIES,
   CHAT_STREAM_CAPABILITIES,
+  CONNECTOR_CREDENTIAL_CAPABILITIES,
   decryptRelayEnvelope,
   encryptRelayPayload,
   deriveRelayEpoch,
@@ -127,7 +128,8 @@ test("real OpenCode serves an encrypted session.list through the plugin", async 
     assert.equal(message.protocolVersion, RELAY_PROTOCOL_VERSION)
     assert.equal(message.type, "connector.hello")
     assert.equal(message.pluginVersion, "0.1.0")
-    assert.deepEqual(message.capabilities, ["session.list", ...CHAT_CAPABILITIES, ...PROJECT_MCP_CAPABILITIES, ...CHAT_STREAM_CAPABILITIES])
+    assert.deepEqual(message.capabilities, ["session.list", ...CHAT_CAPABILITIES, ...PROJECT_MCP_CAPABILITIES,
+      ...CHAT_STREAM_CAPABILITIES, ...CONNECTOR_CREDENTIAL_CAPABILITIES])
     assert.match(message.identity.keyId, /^[A-Za-z0-9_-]{43}$/u)
     assert.match(message.identity.publicKey, /^[A-Za-z0-9_-]+$/u)
 
