@@ -10,6 +10,8 @@ import {
 } from "@openremotecode/protocol"
 
 const NOW = 1_788_115_200_000
+const TEST_EPOCH = "e".repeat(43)
+let nextSequence = 0
 
 test("session.list is dispatched and returned as an encrypted normalized response", async () => {
   const connector = await generateConnectorIdentity(NOW)
@@ -33,6 +35,7 @@ test("session.list is dispatched and returned as an encrypted normalized respons
     recipient: client.identity,
     sender: connector.identity.publicIdentity,
     envelope: response,
+    epoch: TEST_EPOCH,
     now: NOW,
   })
 
@@ -55,6 +58,7 @@ test("unsupported operations return an encrypted protocol error", async () => {
     recipient: client.identity,
     sender: connector.identity.publicIdentity,
     envelope: response,
+    epoch: TEST_EPOCH,
     now: NOW,
   })
 
@@ -99,6 +103,7 @@ test("OpenCode failures return a fixed encrypted error without internal details"
     recipient: client.identity,
     sender: connector.identity.publicIdentity,
     envelope: response,
+    epoch: TEST_EPOCH,
     now: NOW,
   })
   assert.deepEqual(payload.body, {
@@ -108,12 +113,14 @@ test("OpenCode failures return a fixed encrypted error without internal details"
 })
 
 function createDispatcher(connector, client, sessions) {
-  return new CommandDispatcher({
+  const dispatcher = new CommandDispatcher({
     connectorIdentity: connector.identity,
     trustedClient: client.identity.publicIdentity,
     sessions,
     now: () => NOW,
   })
+  dispatcher.setEpoch(TEST_EPOCH)
+  return dispatcher
 }
 
 async function createRequest(client, connector, operation, body) {
@@ -121,14 +128,15 @@ async function createRequest(client, connector, operation, body) {
     sender: client.identity,
     recipient: connector.identity.publicIdentity,
     payload: {
-      protocolVersion: 1,
+      protocolVersion: 2,
       kind: "request",
       requestId: crypto.randomUUID(),
       sentAt: NOW,
       operation,
       body,
     },
-    sequence: 0,
+    epoch: TEST_EPOCH,
+    sequence: nextSequence++,
     now: NOW,
   })
 }

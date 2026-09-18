@@ -2,13 +2,14 @@ import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import { setImmediate as immediate } from "node:timers/promises"
 import test from "node:test"
-import { decryptRelayEnvelope, encryptRelayPayload, generateConnectorIdentity, PROJECT_MCP_CAPABILITIES,
-  projectMcpUpdatedEventSchema } from "@openremotecode/protocol"
+import { CONNECTOR_CREDENTIAL_CAPABILITIES, decryptRelayEnvelope, encryptRelayPayload, generateConnectorIdentity,
+  PROJECT_MCP_CAPABILITIES, projectMcpUpdatedEventSchema } from "@openremotecode/protocol"
 import { CommandDispatcher } from "../../dist/command-dispatcher.js"
 import { ChatAccessError } from "../../dist/chat-adapter.js"
 
 const fixture = JSON.parse(await readFile(new URL("../../../../protocol/test/fixtures/project-mcp-v1.json", import.meta.url), "utf8"))
 const flush = async () => { for (let i = 0; i < 8; i++) await immediate() }
+const TEST_EPOCH = "e".repeat(43)
 async function waitFor(predicate) {
   const deadline = performance.now() + 2000
   while (!predicate()) {
@@ -27,12 +28,14 @@ async function setup(t, enabled = true) {
       return state.read ? state.read(projectId, signal) : state.result
     } } } : {}) })
   t.after(() => dispatcher.dispose())
+  dispatcher.setEpoch(TEST_EPOCH)
   const disconnect = dispatcher.attachRelay((envelope) => { state.events.push(envelope); return state.send })
+  let sequence = 0
   const request = (operation, body, requestId = crypto.randomUUID(), sender = client, kind = "request") => encryptRelayPayload({
-    sender, recipient: connector.publicIdentity, sequence: 0,
-    payload: { protocolVersion: 1, kind, operation, body, requestId, sentAt: Date.now() },
+    sender, recipient: connector.publicIdentity, epoch: TEST_EPOCH, sequence: sequence++,
+    payload: { protocolVersion: 2, kind, operation, body, requestId, sentAt: Date.now() },
   })
-  const decode = (envelope) => decryptRelayEnvelope({ recipient: client, sender: connector.publicIdentity, envelope })
+  const decode = (envelope) => decryptRelayEnvelope({ recipient: client, sender: connector.publicIdentity, envelope, epoch: TEST_EPOCH })
   return { connector, client, state, dispatcher, disconnect, request, decode,
     call: async (operation, body, requestId) => decode(await dispatcher.handle(await request(operation, body, requestId))),
     tick: async (ms) => { t.mock.timers.tick(ms); await flush() } }
@@ -60,7 +63,7 @@ test("encrypted snapshot and unsolicited full replacements have independent corr
     assert.equal(wire.includes(privateField), false)
   }
   const stranger = (await generateConnectorIdentity()).identity
-  await assert.rejects(decryptRelayEnvelope({ recipient: stranger, sender: f.connector.publicIdentity, envelope: f.state.events[0] }))
+  await assert.rejects(decryptRelayEnvelope({ recipient: stranger, sender: f.connector.publicIdentity, envelope: f.state.events[0], epoch: TEST_EPOCH }))
   const renewed = await f.call("project.mcp.subscribe", fixture.subscribeRequest, requestId)
   assert.equal(renewed.requestId, requestId)
   assert.equal(renewed.body.revision, 2, "A new encrypted renewal is a fresh read, not the mutation journal")
@@ -90,7 +93,7 @@ test("hostile bodies, versions, event markers and arbitrary MCP actions never re
 
 test("MCP capability advertisement is independent of chat and disabled readers fail closed", async (t) => {
   const f = await setup(t, false)
-  assert.deepEqual(f.dispatcher.capabilities, ["session.list"])
+  assert.deepEqual(f.dispatcher.capabilities, ["session.list", ...CONNECTOR_CREDENTIAL_CAPABILITIES])
   for (const operation of PROJECT_MCP_CAPABILITIES) {
     assert.equal((await f.call(operation, fixture.subscribeRequest)).body.code, "unsupported_operation")
   }
@@ -103,7 +106,8 @@ test("untrusted, tampered, expired, wrong-recipient and replayed encrypted subsc
   assert.equal(await f.dispatcher.handle(await f.request("project.mcp.subscribe", fixture.subscribeRequest, crypto.randomUUID(), stranger)), undefined)
   const frame = await f.request("project.mcp.subscribe", fixture.subscribeRequest)
   for (const override of [{ sequence: frame.sequence + 1 }, { messageId: crypto.randomUUID() },
-    { recipientKeyId: stranger.publicIdentity.keyId }, { expiresAt: Date.now() - 1 }]) {
+    { recipientKeyId: stranger.publicIdentity.keyId }, { expiresAt: Date.now() - 1 },
+    { epoch: "f".repeat(43) }]) {
     assert.equal(await f.dispatcher.handle({ ...frame, ...override }), undefined)
   }
   assert.equal(f.state.calls, 0)

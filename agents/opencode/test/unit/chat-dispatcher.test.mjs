@@ -8,19 +8,24 @@ import { ChatAccessError } from "../../dist/chat-adapter.js"
 const mutationFixtures = JSON.parse(await readFile(new URL("../../../../protocol/test/fixtures/chat-mutations-v1.json", import.meta.url), "utf8"))
 const promptFixtures = JSON.parse(await readFile(new URL("../../../../protocol/test/fixtures/chat-prompt-mode-v1.json", import.meta.url), "utf8"))
 
+const TEST_EPOCH = "e".repeat(43)
+
 async function fixture(execute) {
   const connector = await generateConnectorIdentity()
   const client = await generateConnectorIdentity()
   const dispatcher = new CommandDispatcher({ connectorIdentity: connector.identity,
     trustedClient: client.identity.publicIdentity, sessions: { listSessions: async () => [] }, chats: { execute } })
+  dispatcher.setEpoch(TEST_EPOCH)
+  let sequence = 0
   return {
     dispatcher,
     async request(operation, body, requestId = crypto.randomUUID()) {
       return encryptRelayPayload({ sender: client.identity, recipient: connector.identity.publicIdentity,
-        payload: { protocolVersion: 1, kind: "request", requestId, sentAt: Date.now(), operation, body }, sequence: 0 })
+        payload: { protocolVersion: 2, kind: "request", requestId, sentAt: Date.now(), operation, body },
+        epoch: TEST_EPOCH, sequence: sequence++ })
     },
     async decode(envelope) { return decryptRelayEnvelope({ recipient: client.identity,
-      sender: connector.identity.publicIdentity, envelope }) },
+      sender: connector.identity.publicIdentity, envelope, epoch: TEST_EPOCH }) },
   }
 }
 
