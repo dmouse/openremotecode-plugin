@@ -33,7 +33,7 @@ jobs:
       # (test/support/opencode-project-fixture.mjs OPENCODE_VERSION).
       - name: Install OpenCode CLI
         run: |
-          curl -fsSL https://opencode.ai/install | bash -s -- --version 1.18.30
+          curl -fsSL https://opencode.ai/install | bash -s -- --version 1.18.31
           echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
 
       - name: Lint
