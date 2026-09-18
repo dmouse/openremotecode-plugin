@@ -116,7 +116,7 @@ function remoteOptions(api: TuiPluginApi, status: RemoteStatus): TuiDialogSelect
       },
       { title: "Refresh", value: "refresh" },
       { title: "Close", value: "close" },
-    ]
+    ];
   }
   if (status.type === "pairing") {
     return [
@@ -128,20 +128,20 @@ function remoteOptions(api: TuiPluginApi, status: RemoteStatus): TuiDialogSelect
       { title: "Generate a new pairing code", value: "regenerate" },
       { title: "Refresh", value: "refresh" },
       { title: "Close", value: "close" },
-    ]
+    ];
   }
   if (status.type === "error") {
     return [
       { title: "Pairing status unavailable", value: "status", description: status.message },
       { title: "Refresh", value: "refresh" },
       { title: "Close", value: "close" },
-    ]
+    ];
   }
   if (status.type === "revoked") {
     return [
       { title: "Remote access revoked", value: "status", description: "Restart OpenCode to create a new pairing code." },
       { title: "Close", value: "close" },
-    ]
+    ];
   }
   return [
     {
@@ -151,7 +151,7 @@ function remoteOptions(api: TuiPluginApi, status: RemoteStatus): TuiDialogSelect
     },
     { title: "Refresh", value: "refresh" },
     { title: "Close", value: "close" },
-  ]
+  ];
 }
 
 async function showTokenDetails(
@@ -237,13 +237,13 @@ function renderTokenDetails(
 function activeIndicator(api: TuiPluginApi): TuiDialogSelectOption<RemoteAction>["footer"] {
   // A span retains the success color inside the native list's selected-row text.
   const render = () => {
-    const span = createElement("span")
-    setProp(span, "style", { fg: api.theme.current.success })
-    insert(span, "✓ Active")
-    return span
-  }
+    const span = createElement("span");
+    setProp(span, "style", { fg: api.theme.current.success });
+    insert(span, "✓ Active");
+    return span;
+  };
   // Solid accepts lazy JSX accessors at runtime; its DOM JSX type omits OpenTUI renderables.
-  return render as unknown as TuiDialogSelectOption<RemoteAction>["footer"]
+  return render as unknown as TuiDialogSelectOption<RemoteAction>["footer"];
 }
 
 async function revokeRemoteAccess(
@@ -339,56 +339,56 @@ async function readRemoteStatus(
   authorizationStore: FileConnectorAuthorizationStore,
   pairingStore: FileConnectorPairingStore,
 ): Promise<RemoteStatus> {
-  const authorization = await authorizationStore.load()
+  const authorization = await authorizationStore.load();
   if (authorization && Date.parse(authorization.credentialExpiresAt) > Date.now()) {
     return {
       type: "connected",
       authorization,
-    }
+    };
   }
-  const pairing = await pairingStore.load()
-  if (pairing && Date.parse(pairing.expiresAt) > Date.now()) return { type: "pairing", pairing }
-  return { type: "waiting" }
+  const pairing = await pairingStore.load();
+  if (pairing && Date.parse(pairing.expiresAt) > Date.now()) return { type: "pairing", pairing };
+  return { type: "waiting" };
 }
 
 function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
   // AbortSignal.reason is typed `any` and isn't guaranteed to be an Error for a custom abort reason.
   const rejectReason = (reject: (reason: Error) => void) => {
-    reject(signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason)))
-  }
+    reject(signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason)));
+  };
   return new Promise((resolve, reject) => {
-    if (signal.aborted) { rejectReason(reject); return }
+    if (signal.aborted) { rejectReason(reject); return; }
     const onAbort = () => {
-      clearTimeout(timer)
-      rejectReason(reject)
-    }
+      clearTimeout(timer);
+      rejectReason(reject);
+    };
     const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort)
-      resolve()
-    }, milliseconds)
-    signal.addEventListener("abort", onAbort, { once: true })
-  })
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function shortIdentifier(value: string): string {
-  return value.length > 16 ? `${value.slice(0, 16)}...` : value
+  return value.length > 16 ? `${value.slice(0, 16)}...` : value;
 }
 
 function formatDate(value: string): string {
-  return new Date(value).toLocaleString()
+  return new Date(value).toLocaleString();
 }
 
 function formatTokenExpiration(value: string): string {
   return new Intl.DateTimeFormat(undefined, {
     year: "numeric", month: "short", day: "numeric",
     hour: "numeric", minute: "2-digit", timeZoneName: "short",
-  }).format(new Date(value))
+  }).format(new Date(value));
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return error instanceof Error ? error.message : String(error);
 }
 
-const plugin = { id: "opencode-remote", tui } satisfies TuiPluginModule & { id: string }
+const plugin = { id: "opencode-remote", tui } satisfies TuiPluginModule & { id: string };
 
-export default plugin
+export default plugin;

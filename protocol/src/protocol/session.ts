@@ -1,8 +1,8 @@
-import { z } from "zod"
+import { z } from "zod";
 
-export const SESSION_LIST_OPERATION = "session.list" as const
+export const SESSION_LIST_OPERATION = "session.list" as const;
 
-export const sessionListRequestBodySchema = z.object({}).strict()
+export const sessionListRequestBodySchema = z.object({}).strict();
 
 export const remoteSessionSchema = z
   .object({
@@ -12,13 +12,13 @@ export const remoteSessionSchema = z
     createdAt: z.number().int().nonnegative(),
     updatedAt: z.number().int().nonnegative(),
   })
-  .strict()
+  .strict();
 
 export const sessionListResponseBodySchema = z
   .object({
     sessions: z.array(remoteSessionSchema).max(10_000),
   })
-  .strict()
+  .strict();
 
 export const protocolErrorBodySchema = z
   .object({
@@ -34,7 +34,7 @@ export const protocolErrorBodySchema = z
     ]),
     message: z.string().min(1).max(256),
   })
-  .strict()
+  .strict();
 
 export type RemoteSession = z.infer<typeof remoteSessionSchema>
 export type SessionListResponseBody = z.infer<

@@ -1,9 +1,9 @@
-import type { PluginInput } from "@opencode-ai/plugin"
+import type { PluginInput } from "@opencode-ai/plugin";
 
 import {
   remoteSessionSchema,
   type RemoteSession,
-} from "@openremotecode/protocol"
+} from "@openremotecode/protocol";
 
 type OpenCodeClient = PluginInput["client"]
 
@@ -12,16 +12,16 @@ export interface SessionReader {
 }
 
 export class OpenCodeAdapter implements SessionReader {
-  readonly #client: OpenCodeClient
+  readonly #client: OpenCodeClient;
 
   constructor(client: OpenCodeClient) {
-    this.#client = client
+    this.#client = client;
   }
 
   async listSessions(): Promise<RemoteSession[]> {
-    const result = await this.#client.session.list()
+    const result = await this.#client.session.list();
     if (result.error || !Array.isArray(result.data)) {
-      throw new Error("OpenCode session list failed")
+      throw new Error("OpenCode session list failed");
     }
 
     return result.data.filter((session) => !session.parentID).map((session) =>
@@ -32,6 +32,6 @@ export class OpenCodeAdapter implements SessionReader {
         createdAt: session.time.created,
         updatedAt: session.time.updated,
       }),
-    )
+    );
   }
 }

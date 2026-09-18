@@ -1,6 +1,6 @@
-import type { PluginInput } from "@opencode-ai/plugin"
+import type { PluginInput } from "@opencode-ai/plugin";
 
-const MAX_EVENT_LENGTH = 1_000_000
+const MAX_EVENT_LENGTH = 1_000_000;
 
 /**
  * Pinned 1.18.30 transport shim. The root SDK's event.subscribe() ignores the
@@ -12,42 +12,42 @@ const MAX_EVENT_LENGTH = 1_000_000
 export async function* openCodeEvents(client: PluginInput["client"], directory: string,
   signal: AbortSignal): AsyncGenerator {
   const options = { url: "/event", query: { directory }, signal,
-    headers: { Accept: "text/event-stream" }, parseAs: "stream" as const, redirect: "error" as const }
-  const result = await client.session.list(options)
+    headers: { Accept: "text/event-stream" }, parseAs: "stream" as const, redirect: "error" as const };
+  const result = await client.session.list(options);
   if (!result.response.ok || !result.response.headers.get("content-type")?.startsWith("text/event-stream") ||
-      !result.response.body) throw new Error("Agent event stream unavailable")
-  const reader = result.response.body.getReader()
-  const decoder = new TextDecoder("utf-8", { fatal: true })
-  const abort = () => { void reader.cancel().catch(() => {}) }
-  signal.addEventListener("abort", abort, { once: true })
-  let buffer = ""
+      !result.response.body) throw new Error("Agent event stream unavailable");
+  const reader = result.response.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const abort = () => { void reader.cancel().catch(() => {}); };
+  signal.addEventListener("abort", abort, { once: true });
+  let buffer = "";
   try {
-    if (signal.aborted) return
+    if (signal.aborted) return;
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the signal can abort during reader.read() across iterations
     while (!signal.aborted) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      let boundary: RegExpExecArray | null
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let boundary: RegExpExecArray | null;
       while ((boundary = /\r?\n\r?\n/u.exec(buffer))) {
-        const frame = buffer.slice(0, boundary.index)
-        buffer = buffer.slice(boundary.index + boundary[0].length)
-        if (frame.length > MAX_EVENT_LENGTH) throw new Error("Agent event limit")
-        const lines = frame.split(/\r?\n/u).filter((line) => line.startsWith("data:"))
-        if (!lines.length) continue
-        const data = lines.map((line) => line.slice(5).replace(/^ /u, "")).join("\n")
+        const frame = buffer.slice(0, boundary.index);
+        buffer = buffer.slice(boundary.index + boundary[0].length);
+        if (frame.length > MAX_EVENT_LENGTH) throw new Error("Agent event limit");
+        const lines = frame.split(/\r?\n/u).filter((line) => line.startsWith("data:"));
+        if (!lines.length) continue;
+        const data = lines.map((line) => line.slice(5).replace(/^ /u, "")).join("\n");
         // Invalid JSON/UTF-8 errors can contain source text: never expose them.
-        yield JSON.parse(data) as unknown
+        yield JSON.parse(data) as unknown;
         // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the signal can abort while the consumer processes the yielded event
-        if (signal.aborted) return
+        if (signal.aborted) return;
       }
-      if (buffer.length > MAX_EVENT_LENGTH) throw new Error("Agent event limit")
+      if (buffer.length > MAX_EVENT_LENGTH) throw new Error("Agent event limit");
     }
   } catch (cause) {
-    if (!signal.aborted) throw new Error("Agent event stream unavailable", { cause })
+    if (!signal.aborted) throw new Error("Agent event stream unavailable", { cause });
   } finally {
-    signal.removeEventListener("abort", abort)
-    await reader.cancel().catch(() => {})
-    reader.releaseLock()
+    signal.removeEventListener("abort", abort);
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
 }

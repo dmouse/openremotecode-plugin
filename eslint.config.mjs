@@ -26,6 +26,8 @@ export default tseslint.config(
       },
     },
     rules: {
+      "semi": ["error", "always"],
+      "curly": ["error", "multi-line"],
       "@typescript-eslint/no-floating-promises": "error",
       "@typescript-eslint/no-misused-promises": "error",
       "@typescript-eslint/consistent-type-imports": [
