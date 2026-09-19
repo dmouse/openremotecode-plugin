@@ -198,10 +198,9 @@ export class OpenCodeChatAdapter implements ChatAdapter, ProjectMcpReader {
       return { version: 1, accepted: true };
     }
     if (operation === "chat.permission.reply") {
-      // Never "always": a persistent grant is outside scope. Schema-enforced
-      // above; re-asserted here so a future enum widening can't silently
-      // reach OpenCode without a corresponding review of this comment.
-      const response: "once" | "reject" = body.response === "once" ? "once" : "reject";
+      // Schema-enforced above to exactly OpenCode's own choices; passed through
+      // unchanged so an explicit "always" is never downgraded.
+      const response = body.response as "once" | "always" | "reject";
       const result = await this.#client.postSessionIdPermissionsPermissionId({ ...this.#registry.options(workspace), signal,
         path: { id: sessionId, permissionID: String(body.permissionId) }, body: { response } });
       if (result.error || !result.response.ok) throw new Error("OpenCode permission reply was not accepted");

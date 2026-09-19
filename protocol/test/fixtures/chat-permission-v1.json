@@ -5,6 +5,7 @@
     "metadata": { "command": "npm install", "secret": "PRIVATE_METADATA" },
     "always": [], "time": { "created": 1000 }
   },
+  "replies": ["reject", "once", "always"],
   "response": {
     "version": 1,
     "chat": { "id": "ses_permission", "title": "Permission presentation", "updatedAt": 1000 },

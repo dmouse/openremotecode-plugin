@@ -1,6 +1,6 @@
 {
   "name": "@openremotecode/opencode",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Secure outbound connector between OpenCode and Open Remote Code",
   "keywords": [
     "opencode",

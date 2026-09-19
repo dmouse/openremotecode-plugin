@@ -167,7 +167,7 @@ test("pagination retains the supplied SDK transport and rejects cross-project cu
   assert.equal(requests.length, 1)
 })
 
-test("chat.permission.reply is once/reject only, requires membership, and never targets a child session directly", async (t) => {
+test("chat.permission.reply is once/always/reject only, requires membership, and never targets a child session directly", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "chat-permission-"))
   t.after(() => rm(root, { recursive: true, force: true }))
   const session = { id: "ses_fixture", directory: root }
@@ -184,22 +184,22 @@ test("chat.permission.reply is once/reject only, requires membership, and never 
   const adapter = new OpenCodeChatAdapter(client, root)
   const { projects } = await adapter.execute("project.list", {})
   const body = { version: 1, projectId: projects[0].id, sessionId: session.id, permissionId: "per_fixture" }
-  for (const response of ["once", "reject"]) {
+  for (const response of ["once", "always", "reject"]) {
     assert.deepEqual(await adapter.execute("chat.permission.reply", { ...body, response }), { version: 1, accepted: true })
     const options = calls.at(-1)
     assert.deepEqual(options.path, { id: session.id, permissionID: "per_fixture" })
     assert.deepEqual(options.body, { response })
     assert.deepEqual(options.query, { directory: root })
   }
-  // Never "always": rejected before it could reach OpenCode, matching the protocol schema.
-  await assert.rejects(adapter.execute("chat.permission.reply", { ...body, response: "always" }))
-  assert.equal(calls.length, 2, "the rejected enum value never reaches the SDK call")
+  // Anything outside the enum is rejected before it could reach OpenCode, matching the protocol schema.
+  await assert.rejects(adapter.execute("chat.permission.reply", { ...body, response: "forever" }))
+  assert.equal(calls.length, 3, "the rejected enum value never reaches the SDK call")
   session.parentID = "ses_parent"
   await assert.rejects(adapter.execute("chat.permission.reply", { ...body, response: "once" }), { code: "access_denied" })
   delete session.parentID
   await assert.rejects(adapter.execute("chat.permission.reply", { ...body, response: "once", projectId: crypto.randomUUID() }),
     { code: "context_expired" })
-  assert.equal(calls.length, 2)
+  assert.equal(calls.length, 3)
   for (const nextStatus of [400, 404, 500]) {
     status = nextStatus
     await assert.rejects(adapter.execute("chat.permission.reply", { ...body, response: "reject" }))

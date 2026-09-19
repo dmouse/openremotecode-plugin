@@ -58,13 +58,14 @@ capability's "presentation allowlist, not a raw passthrough" rule.
 { "permissionId": "per_090dffe76001obsZ3HAvPfK17M", "response": "once" }
 ```
 
-`response` is `"once"` or `"reject"` **only**. OpenCode's native reply also
-accepts `"always"` (a persistent, saved grant beyond this one request), but
-this protocol never exposes it: the product's stated scope explicitly
-excludes persistent permission grants from a remote client. Widening this
-later is a trust-boundary change requiring its own discussion, not a
-protocol-version bump. A malformed or unrecognized `response` value fails
-validation before anything reaches OpenCode.
+`response` is `"once"`, `"always"` or `"reject"` **only**, mirroring the
+three choices OpenCode's own TUI offers. `"always"` is a persistent grant
+that OpenCode saves beyond this one request, so a client must send it only
+for an explicit user action on a single pending request, never as a default
+or automatically. The protocol version is unchanged. A malformed or
+unrecognized `response` value fails validation before anything reaches
+OpenCode, and the plugin passes a valid value through unchanged rather than
+downgrading it.
 
 `chat.permission.reply` requires the same project/session authorization and
 child-session membership checks every other mutating operation
@@ -108,9 +109,13 @@ handle by disabling actions it can no longer trust.
 
 - **First mutating, execution-gating capability.** Every prior addition
   changed only what a client can see; a permission reply changes what the
-  agent is allowed to do next. The response enum is deliberately narrowed to
-  `once`/`reject` specifically to bound the blast radius of any single
-  reply to one action, never a standing rule.
+  agent is allowed to do next. `once` and `reject` bound a
+  reply to one action. `always` deliberately does not: it creates a standing
+  grant in the local OpenCode instance that later requests match without
+  asking. That is the same choice the user already has at the TUI, and it is
+  available here only as an explicit tap on the pending request. The same
+  accepted-risk category applies: a compromised paired device could send it,
+  which is why revoking a device stops all replies.
 - **Expanded disclosure boundary:** a request's description and pattern can
   reveal what the agent is about to do (a command, a file, a URL) to an
   authorized paired device that would not otherwise see it before the fact.
@@ -133,8 +138,9 @@ handle by disabling actions it can no longer trust.
 - **Hostile content:** `operation` is a strict enum, `description`/`pattern`
   are bounded and sanitized exactly like every other description field in
   this protocol; nothing here evaluates as executable content on the
-  client. Raw `metadata` and OpenCode's `"always"`/save-pattern fields never
-  cross the boundary at all.
+  client. Raw `metadata` and OpenCode's native save-pattern field never
+  cross the boundary; the client can choose `always` but cannot choose or
+  see what pattern OpenCode stores for it.
 - **No new execution surface:** the reply operation calls only OpenCode's
   own permission-reply endpoint for a request OpenCode itself already
   created: it does not let a client invent a permission request, choose
@@ -144,8 +150,9 @@ handle by disabling actions it can no longer trust.
 The shared `chat-permission-v1.json` fixture covers a bounded request with a
 joined pattern and a private-looking metadata field that must never appear
 in the projected output. Protocol tests cover strict field validation, the
-opt-in/absent/null/object states, and that `"always"` (and near-miss typos)
-are rejected before they could reach OpenCode. Plugin tests cover mapping
+opt-in/absent/null/object states, that `once`, `always` and `reject` are the only accepted replies, and that
+near-miss typos are rejected before they could reach OpenCode. The fixture's
+`replies` list is also asserted by the mobile tests. Plugin tests cover mapping
 and sanitization from the native event, live capture/clear across both the
 reply itself and another party resolving the same request, and the
 authorization checks on the reply operation.

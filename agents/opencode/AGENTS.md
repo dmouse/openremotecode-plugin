@@ -59,10 +59,10 @@ Initial approved capabilities are:
 - Retrieve a session and its message snapshot.
 - Submit a text prompt asynchronously.
 - Abort an active session response.
-- Reply once to or reject a permission request.
+- Reply to a permission request with once, always, or reject.
 - Retrieve current session status and todos.
 
-Do not implement a generic OpenCode API proxy. Do not accept arbitrary endpoint names or SDK method names from a remote client. Shell commands, file reads, file writes, provider authentication, configuration mutation, session sharing, and persistent permission grants are excluded until separately threat-modeled and approved.
+Do not implement a generic OpenCode API proxy. Do not accept arbitrary endpoint names or SDK method names from a remote client. Shell commands, file reads, file writes, provider authentication, configuration mutation, session sharing, are excluded until separately threat-modeled and approved. A permission reply of `always` is allowed only as the explicit per-request choice in `chat.permission.reply`.
 
 ## Event Flow
 

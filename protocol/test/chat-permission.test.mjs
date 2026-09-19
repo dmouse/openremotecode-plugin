@@ -23,12 +23,14 @@ test("permission is opt-in presentation, independent of tools/shell/images, neve
   chatResponses["chat.snapshot"].parse({ ...fixture.response, permission: null })
 })
 
-test("chat.permission.reply is once/reject only -- never always, a persistent grant", () => {
+test("chat.permission.reply accepts exactly once, always and reject", () => {
   const request = { version: 1, projectId: "00000000-0000-4000-8000-000000000001",
     sessionId: "ses_permission", permissionId: "per_fixture" }
-  chatRequests["chat.permission.reply"].parse({ ...request, response: "once" })
-  chatRequests["chat.permission.reply"].parse({ ...request, response: "reject" })
-  for (const response of ["always", "Once", "", null, undefined, 1]) {
+  for (const response of fixture.replies) {
+    chatRequests["chat.permission.reply"].parse({ ...request, response })
+  }
+  assert.deepEqual([...fixture.replies].sort(), ["always", "once", "reject"])
+  for (const response of ["forever", "Always", "Once", "", null, undefined, 1]) {
     assert.equal(chatRequests["chat.permission.reply"].safeParse({ ...request, response }).success, false)
   }
   chatResponses["chat.permission.reply"].parse({ version: 1, accepted: true })

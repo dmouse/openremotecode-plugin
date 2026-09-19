@@ -45,9 +45,10 @@ export const chatRequests = {
     mode: z.enum(["build", "plan"]).optional(),
     model: promptModel.optional() }).strict(),
   "chat.abort": z.object(session).strict(),
-  // Never "always": persistent grants are outside scope. See CHAT-PERMISSIONS.md.
+  // Mirrors OpenCode's own once/always/reject choices. `always` is a persistent grant the
+  // user makes explicitly per request. See CHAT-PERMISSIONS.md.
   "chat.permission.reply": z.object({ ...session, permissionId: id,
-    response: z.enum(["once", "reject"]) }).strict(),
+    response: z.enum(["once", "always", "reject"]) }).strict(),
   // One answer per pending question, in the same order OpenCode's own batch reply
   // endpoint expects. Each entry is either positions into that question's option list,
   // or -- when that question's own `custom` flag allows it -- free text the user typed,
