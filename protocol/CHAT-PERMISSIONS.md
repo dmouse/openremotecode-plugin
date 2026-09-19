@@ -73,6 +73,16 @@ it hasn't independently verified the caller can reach. A successful reply
 returns `{ accepted: true }`, the same fixed acknowledgment shape
 `chat.prompt`/`chat.abort` already use.
 
+## Concurrent requests
+
+OpenCode can hold several pending requests for one session at once: parallel
+tool calls each ask, and each blocks its tool until answered. The plugin keeps
+all of them and the snapshot's single `permission` is always the oldest.
+Answering it makes the next one appear on the following snapshot, so a client
+needs no protocol change to work through a batch. Presenting only the newest
+would strand the earlier requests and leave the agent waiting on a prompt no
+client ever showed.
+
 ## Visibility is live-only
 
 OpenCode's native permission API has no endpoint to list currently-pending

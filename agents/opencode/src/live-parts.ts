@@ -25,8 +25,12 @@ export class LiveParts {
   #status: Snapshot["status"] | undefined;
   // v1 OpenCode has no endpoint to list pending permissions -- this event-
   // captured value is the only source of truth. See CHAT-PERMISSIONS.md.
-  #permission: PermissionRequest | undefined;
-  get permission(): PermissionRequest | undefined { return this.#permission; }
+  //
+  // OpenCode can hold several requests for one session at once (parallel tool calls
+  // each ask), and every one blocks its tool until answered. All are kept, and the
+  // oldest is the one presented: answering it surfaces the next, so none is stranded.
+  readonly #permissions = new Map<string, PermissionRequest>();
+  get permission(): PermissionRequest | undefined { return this.#permissions.values().next().value; }
   // OpenCode's "todo.updated" carries the complete replacement list, so a
   // captured one is always at least as current as the last snapshot read and
   // supersedes it. Unlike a permission, the list is also readable on demand
@@ -64,7 +68,8 @@ export class LiveParts {
     // event names are accepted in case a future build reconciles the naming.
     if (event.type === "permission.asked" || event.type === "permission.updated") {
       if (properties.sessionID === this.sessionId && typeof properties.id === "string") {
-        this.#permission = properties as PermissionRequest;
+        if (!this.#permissions.has(properties.id) && this.#permissions.size >= 64) throw new Error("Live permission limit");
+        this.#permissions.set(properties.id, properties as PermissionRequest);
         this.reconcileSoon = true;
       }
       return;
@@ -92,8 +97,7 @@ export class LiveParts {
       // The reply event's id field wasn't directly observed live; accept
       // either name the SDK types vs. the binary's internal bus schema use.
       const repliedId = properties.permissionID ?? properties.requestID;
-      if (properties.sessionID === this.sessionId && repliedId === this.#permission?.id) {
-        this.#permission = undefined;
+      if (properties.sessionID === this.sessionId && typeof repliedId === "string" && this.#permissions.delete(repliedId)) {
         this.reconcileSoon = true;
       }
       return;
@@ -216,7 +220,7 @@ export class LiveParts {
     // user is what separates an abandoned part from a blocked one. Every
     // input here is event-captured, so this costs no native read. See ADR 0012.
     const settled = (this.next.status ?? this.#status ?? snapshot.status) === "idle" &&
-      !this.#permission && !this.#question;
+      !this.permission && !this.#question;
     for (const [id, role] of this.#roles) {if (role === "assistant" && !messages.has(id) &&
       [...this.parts.values()].some((p) => p.messageID === id)) {
       messages.set(id, { id, role, text: "", truncated: false });
@@ -267,7 +271,7 @@ export class LiveParts {
     const { permission: _rememberedPermission, todos: rememberedTodos, ...rest } = snapshot;
     return { ...rest, status: this.next.status ?? this.#status ?? snapshot.status, messages: projected,
       ...(options.includePermissions
-        ? { permission: this.#permission ? permissionSummary(this.#permission) : null } : {}),
+        ? { permission: this.permission ? permissionSummary(this.permission) : null } : {}),
       ...(options.includeTodos ? { todos: this.#todos ?? rememberedTodos ?? [] } : {}) };
   }
   clear() {

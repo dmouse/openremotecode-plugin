@@ -57,6 +57,25 @@ test("LiveParts also accepts the legacy permission.updated event name and the re
   assert.equal(live.permission, undefined)
 })
 
+test("LiveParts keeps every concurrent request and presents them oldest first, so none is stranded", () => {
+  // Parallel tool calls each ask; OpenCode blocks every one until answered.
+  const live = new LiveParts("ses_permission")
+  const ask = (id) => ({ type: "permission.asked", properties: { ...fixture.nativePermission, id, sessionID: "ses_permission" } })
+  live.capture(ask("per_first"))
+  live.capture(ask("per_second"))
+  assert.equal(live.permission.id, "per_first", "a later request never displaces an earlier pending one")
+  live.capture({ type: "permission.replied", properties: { sessionID: "ses_permission", requestID: "per_second" } })
+  assert.equal(live.permission.id, "per_first", "answering another request leaves this one pending")
+  live.capture(ask("per_second"))
+  live.capture({ type: "permission.replied", properties: { sessionID: "ses_permission", requestID: "per_first" } })
+  assert.equal(live.permission.id, "per_second", "answering the oldest surfaces the next")
+  live.capture({ type: "permission.replied", properties: { sessionID: "ses_permission", requestID: "per_second" } })
+  assert.equal(live.permission, undefined)
+  const snapshot = { version: 1, chat: fixture.response.chat, status: "busy", cursor: null, messages: [] }
+  live.capture(ask("per_third"))
+  assert.equal(live.project(snapshot, { includePermissions: true }).permission.id, "per_third")
+})
+
 test("LiveParts.project only ever includes permission when requested, refreshed from the live value", () => {
   const live = new LiveParts("ses_permission")
   live.capture({ type: "permission.asked", properties: fixture.nativePermission })
