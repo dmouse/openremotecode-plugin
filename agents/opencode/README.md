@@ -2,7 +2,16 @@
 
 This MIT-licensed package is the local OpenCode integration boundary for Open Remote Code. It loads inside a real OpenCode process, creates a persistent connector identity, completes account pairing, restores its local authorization on later launches, establishes an outbound authenticated relay connection, and serves an encrypted, read-only `session.list` operation through the supplied SDK client.
 
-Set `apiUrl` in the plugin entry of each project's `opencode.json` to select its Open Remote Code API service:
+The plugin connects to `https://api.openremotecode.com` by default, so the plain package name is enough:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["@openremotecode/opencode"]
+}
+```
+
+Set `apiUrl` in the plugin entry of a project's `opencode.json` to select a different (for example self-hosted) Open Remote Code API service:
 
 ```json
 {
@@ -13,7 +22,7 @@ Set `apiUrl` in the plugin entry of each project's `opencode.json` to select its
 }
 ```
 
-For a local build from the workspace root, replace the package name with `./packages/agents/opencode/dist/index.js`. OpenCode 1.18.30 supports this `[plugin, options]` format. URL precedence is `apiUrl`, then `OPENCODE_REMOTE_SERVER_URL`, then `http://127.0.0.1:8080` for explicitly enabled local development. Omit `apiUrl` to keep using the environment variable. An explicitly empty, invalid, or non-string `apiUrl` rejects the remote connection and logs a configuration error while local OpenCode remains usable.
+For a local build from the workspace root, replace the package name with `./packages/agents/opencode/dist/index.js`. OpenCode 1.18.30 supports this `[plugin, options]` format. URL precedence is `apiUrl`, then `OPENCODE_REMOTE_SERVER_URL`, then the production default `https://api.openremotecode.com`. Omit `apiUrl` to keep using the environment variable. An explicitly empty, invalid, or non-string `apiUrl` rejects the remote connection and logs a configuration error while local OpenCode remains usable.
 
 The URL must be an origin without credentials, paths, query parameters, or fragments. HTTPS and WSS are required by default, including on loopback. Every API operation rejects redirects. Relay admission accepts only the contract's `/v1/relay` path on the configured API origin. Configuration chooses a trusted pairing destination; review project plugin configuration before loading it. Stored authorization remains bound to its original service and is never sent to a different origin. To pair separate services, use separate `OPENCODE_REMOTE_DATA_DIR` directories for their local identities and authorization.
 
@@ -27,7 +36,7 @@ opencode
 
 Only the literal value `true` enables HTTP/WS, and only for `127.0.0.1`, `localhost`, or `[::1]`. Unset, empty, or `false` keeps HTTPS/WSS mandatory; other values reject configuration. The flag is read from the process environment, never from project plugin options. It covers pairing, restored credentials, TUI actions, and the development relay. It does not disable certificate verification, redirect rejection, or origin checks. Set it for each development launch; setting it only on the Compose server does not configure the locally running plugin.
 
-For production, leave the flag unset and configure an HTTPS `apiUrl` or `OPENCODE_REMOTE_SERVER_URL`. An HTTP authorization saved during development requires the opt-in again after restarting. See the [transport security decision](docs/adr/0004-transport-security.md).
+For production, leave the flag unset; the default already targets `https://api.openremotecode.com`, and any other service needs an HTTPS `apiUrl` or `OPENCODE_REMOTE_SERVER_URL`. An HTTP authorization saved during development requires the opt-in again after restarting. See the [transport security decision](docs/adr/0004-transport-security.md).
 
 First use starts a short-lived pairing authorization and displays the user code and safety code through OpenCode's TUI. Enter the code in the mobile app's **Add connection** screen, compare the safety codes, and confirm the match. Pending authorization is stored in a separate `0600` file so restarting OpenCode during setup resumes the same code and transcript. The file is removed after completion or expiry. The resulting connector credential and trusted mobile identity are also stored under the Open Remote Code data directory with `0600` file permissions. Each reconnect acquires a fresh one-use WebSocket ticket.
 

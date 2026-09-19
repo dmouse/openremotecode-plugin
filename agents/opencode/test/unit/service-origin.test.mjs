@@ -4,6 +4,7 @@ import test from "node:test"
 import { configuredServiceOrigin, DEFAULT_SERVICE_ORIGIN, validateLocalRelayURL, validateRelayURL } from "../../dist/service-origin.js"
 
 const development = { OPENCODE_REMOTE_ALLOW_INSECURE_LOOPBACK: "true" }
+const LOCAL_ORIGIN = "http://127.0.0.1:8080"
 
 test("plugin apiUrl takes precedence over the environment without changing it", () => {
   const environment = { OPENCODE_REMOTE_SERVER_URL: "https://environment.example.test" }
@@ -18,14 +19,17 @@ test("plugin apiUrl takes precedence over the environment without changing it", 
   )
 })
 
-test("omitting apiUrl preserves the environment and local development fallbacks", () => {
+test("omitting apiUrl preserves the environment and the production default", () => {
   assert.equal(
     configuredServiceOrigin({}, { OPENCODE_REMOTE_SERVER_URL: " https://environment.example.test/ " }).origin,
     "https://environment.example.test",
   )
-  assert.throws(() => configuredServiceOrigin({}, {}), /OPENCODE_REMOTE_ALLOW_INSECURE_LOOPBACK=true/)
+  assert.equal(DEFAULT_SERVICE_ORIGIN, "https://api.openremotecode.com")
+  assert.equal(configuredServiceOrigin({}, {}).origin, DEFAULT_SERVICE_ORIGIN)
+  assert.equal(configuredServiceOrigin({}, { OPENCODE_REMOTE_SERVER_URL: "  " }).origin, DEFAULT_SERVICE_ORIGIN)
   assert.equal(configuredServiceOrigin({}, development).origin, DEFAULT_SERVICE_ORIGIN)
-  assert.equal(configuredServiceOrigin({}, { ...development, OPENCODE_REMOTE_SERVER_URL: "  " }).origin, DEFAULT_SERVICE_ORIGIN)
+  assert.equal(configuredServiceOrigin({}, { ...development, OPENCODE_REMOTE_SERVER_URL: LOCAL_ORIGIN }).origin, LOCAL_ORIGIN)
+  assert.throws(() => configuredServiceOrigin({}, { OPENCODE_REMOTE_SERVER_URL: LOCAL_ORIGIN }), /OPENCODE_REMOTE_ALLOW_INSECURE_LOOPBACK=true/)
   assert.equal(configuredServiceOrigin({ apiUrl: "http://localhost:8081" }, development).origin, "http://localhost:8081")
 })
 
@@ -33,7 +37,7 @@ test("explicit invalid apiUrl fails closed instead of using the environment", ()
   for (const apiUrl of [null, false, 8080, {}, [], "", "  ", "invalid", "http://remote.example.test",
     "https://user:secret@remote.example.test", "https://remote.example.test/v1",
     "https://remote.example.test?token=secret", "https://remote.example.test#fragment", "file:///tmp/api"]) {
-    assert.throws(() => configuredServiceOrigin({ apiUrl }, { OPENCODE_REMOTE_SERVER_URL: DEFAULT_SERVICE_ORIGIN }))
+    assert.throws(() => configuredServiceOrigin({ apiUrl }, { OPENCODE_REMOTE_SERVER_URL: LOCAL_ORIGIN }))
   }
 })
 
@@ -71,7 +75,7 @@ test("invalid flags and project options cannot enable insecure transport", () =>
     assert.throws(() => configuredServiceOrigin({ apiUrl: "https://remote.example.test" }, environment), /must be true or false/)
     assert.throws(() => validateRelayURL("wss://remote.example.test/v1/relay", environment), /must be true or false/)
   }
-  assert.throws(() => configuredServiceOrigin({ apiUrl: DEFAULT_SERVICE_ORIGIN, allowInsecureLoopback: true }, {}))
+  assert.throws(() => configuredServiceOrigin({ apiUrl: LOCAL_ORIGIN, allowInsecureLoopback: true }, {}))
 })
 
 test("development relays reject URL credentials, query strings, and fragments", () => {

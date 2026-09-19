@@ -1,4 +1,4 @@
-export const DEFAULT_SERVICE_ORIGIN = "http://127.0.0.1:8080";
+export const DEFAULT_SERVICE_ORIGIN = "https://api.openremotecode.com";
 const INSECURE_LOOPBACK_ENV = "OPENCODE_REMOTE_ALLOW_INSECURE_LOOPBACK";
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "[::1]", "localhost"]);
 
