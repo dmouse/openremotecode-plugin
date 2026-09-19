@@ -5,6 +5,7 @@ import { readMessageHistory } from "../message-history.js";
 import { ChatAccessError } from "./access-error.js";
 import type { AnsweredQuestionMemory } from "./answered-questions.js";
 import type { CursorStore } from "./cursor.js";
+import { fetchPendingPermissions } from "./permissions.js";
 import { lastAssistantModel } from "./prompt.js";
 import { fetchPendingQuestion } from "./questions.js";
 import { unwrapResult } from "./sdk-result.js";
@@ -57,6 +58,14 @@ export async function buildChatSnapshot(request: SnapshotRequest): Promise<unkno
   const todos = body.includeTodos === true ? await fetchTodos(client, registry, workspace, sessionId, signal) : undefined;
   // Only queried when nothing was captured live -- the event path stays the
   // low-latency default, this is strictly a cold/missed-event fallback.
+  // Requested permissions are read from OpenCode as well as captured from events: a
+  // subscription that restarted after a request was asked (every snapshot read after a
+  // reply restarts it) never saw its event. Adopting them into the live state keeps
+  // the stream projections, which are built from it, showing the same requests.
+  const nativePermissions = body.includePermissions === true
+    ? await fetchPendingPermissions(client, registry, workspace, sessionId, signal) : [];
+  live?.adoptPermissions(nativePermissions);
+  const pendingPermission = live?.permission ?? nativePermissions[0];
   const questions = body.includeQuestions === true && !live?.question
     ? await fetchPendingQuestion(client, registry, workspace, sessionId, signal) : undefined;
   const subtasks = body.includeSubtasks === true || operation === "chat.subtask.snapshot"
@@ -86,17 +95,16 @@ export async function buildChatSnapshot(request: SnapshotRequest): Promise<unkno
   // abandoned rather than blocked. A pending question is only known from a
   // live capture or the caller's negotiated fallback read, so without either
   // source the raw state is left alone. See ADR 0012.
-  const settled = status === "idle" && !live?.permission && !pendingQuestion &&
+  const settled = status === "idle" && !pendingPermission && !pendingQuestion &&
     (live !== undefined || body.includeQuestions === true);
   return { version: 1, chat: toChatSummary(session),
     cursor: cursors.issue(history.cursor, workspace.id, sessionId),
     status,
     ...(model ? { model } : {}),
-    // v1 has no endpoint to list pending permissions; the event-captured
-    // value on the live subscription (if any) is the only source. See
-    // CHAT-PERMISSIONS.md.
+    // The oldest pending request, from the live capture or OpenCode's own list.
+    // See CHAT-PERMISSIONS.md.
     ...(body.includePermissions === true
-      ? { permission: live?.permission ? permissionSummary(live.permission) : null } : {}),
+      ? { permission: pendingPermission ? permissionSummary(pendingPermission) : null } : {}),
     // The event-captured value is preferred when present; `questions` is only
     // populated when there was none, as an on-demand fallback read (see
     // fetchPendingQuestion). Either way questionSummary returns undefined for

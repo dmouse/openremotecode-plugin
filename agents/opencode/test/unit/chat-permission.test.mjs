@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises"
 import test from "node:test"
 import { permissionSummary } from "../../dist/chat-message.js"
 import { LiveParts } from "../../dist/live-parts.js"
+import { fetchPendingPermissions } from "../../dist/chat/permissions.js"
 
 const fixture = JSON.parse(await readFile(new URL("../../../../protocol/test/fixtures/chat-permission-v1.json", import.meta.url), "utf8"))
 
@@ -74,6 +75,41 @@ test("LiveParts keeps every concurrent request and presents them oldest first, s
   const snapshot = { version: 1, chat: fixture.response.chat, status: "busy", cursor: null, messages: [] }
   live.capture(ask("per_third"))
   assert.equal(live.project(snapshot, { includePermissions: true }).permission.id, "per_third")
+})
+
+test("fetchPendingPermissions reads OpenCode's list for this session only and never leaks a failure", async () => {
+  const request = (id, sessionID, permission = "external_directory") => ({ id, sessionID, permission, patterns: ["/x/*"] })
+  const calls = []
+  const client = { session: { list: async (options) => {
+    calls.push(options)
+    return { data: [request("per_a", "ses_permission"), request("per_other", "ses_other"), null, { id: 7, sessionID: "ses_permission" },
+      { id: "per_nokind", sessionID: "ses_permission" }, request("per_b", "ses_permission")], response: { ok: true } }
+  } } }
+  const registry = { options: () => ({ query: { directory: "/x" } }) }
+  const found = await fetchPendingPermissions(client, registry, {}, "ses_permission", AbortSignal.timeout(1000))
+  assert.deepEqual(found.map((r) => r.id), ["per_a", "per_b"], "only this session's well-formed requests, in OpenCode's order")
+  assert.equal(calls[0].url, "/permission")
+  assert.deepEqual(calls[0].query, { directory: "/x" })
+  for (const broken of [async () => { throw new Error("native failure PRIVATE_DETAIL") }, async () => ({ data: { not: "a list" }, response: { ok: true } })]) {
+    assert.deepEqual(await fetchPendingPermissions({ session: { list: broken } }, registry, {}, "ses_permission", AbortSignal.timeout(1000)), [])
+  }
+})
+
+test("a subscription that restarted after the request was asked adopts it from OpenCode's list", () => {
+  // A stream restart starts empty and OpenCode never replays events, so without the
+  // list a request still pending when another was answered would never be shown.
+  const live = new LiveParts("ses_permission")
+  const pending = [{ ...fixture.nativePermission, id: "per_first", sessionID: "ses_permission" },
+    { ...fixture.nativePermission, id: "per_second", sessionID: "ses_permission" }]
+  assert.equal(live.permission, undefined)
+  live.adoptPermissions(pending)
+  live.adoptPermissions(pending)
+  assert.equal(live.permission.id, "per_first")
+  live.capture({ type: "permission.replied", properties: { sessionID: "ses_permission", requestID: "per_first" } })
+  live.adoptPermissions([pending[0]])
+  assert.equal(live.permission.id, "per_second", "adoption never resurrects one already answered on this subscription")
+  const snapshot = { version: 1, chat: fixture.response.chat, status: "busy", cursor: null, messages: [] }
+  assert.equal(live.project(snapshot, { includePermissions: true }).permission.id, "per_second")
 })
 
 test("LiveParts.project only ever includes permission when requested, refreshed from the live value", () => {

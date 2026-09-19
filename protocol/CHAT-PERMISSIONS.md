@@ -83,20 +83,26 @@ needs no protocol change to work through a batch. Presenting only the newest
 would strand the earlier requests and leave the agent waiting on a prompt no
 client ever showed.
 
-## Visibility is live-only
+## Visibility: events, plus OpenCode's pending list
 
-OpenCode's native permission API has no endpoint to list currently-pending
-requests — the only way to learn about one is the event it emits when
-created. The plugin only listens for that event while at least one client
-has an active `chat.stream.subscribe` for the session. A request that both
-starts and needs answering while no mobile client is subscribed (app fully
-closed or backgrounded) is not recoverable on the next cold snapshot — it
-stays invisible to this remote path until the next request happens to fire
-while a client is listening. This is a real, accepted limitation of the
-current native API, not a gap this protocol is introducing or hiding: it is
-exactly the "stale/expired" condition a client is already expected to
-handle by disabling actions it can no longer trust, the same way an offline
-connector already disables other time-sensitive controls.
+The plugin learns about a request from the event OpenCode emits when it is
+created, which it hears only while a client has an active
+`chat.stream.subscribe` for the session. Events alone are not enough: a
+client's subscription is torn down and rebuilt (every snapshot read after a
+reply restarts it), and OpenCode never replays a pending request to a new
+listener, so a request still waiting at that moment would never be shown and
+its tool would stay blocked.
+
+OpenCode 1.18.31 lists every pending request at `GET /permission`. Each
+snapshot that opts in reads it and merges the session's entries into the
+subscription's live state, so a request asked before a subscription started,
+or while no client was subscribed, is still recovered on the next snapshot. A
+request answered on this subscription is remembered briefly and never re-added
+by a read that raced its reply. If the list is unavailable (an older build, or
+a transient failure) the plugin falls back to what events captured, and a
+request asked while no client was listening on such a build is not
+recoverable: the "stale/expired" condition a client is already expected to
+handle by disabling actions it can no longer trust.
 
 ## Threat analysis
 

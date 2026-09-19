@@ -30,7 +30,21 @@ export class LiveParts {
   // each ask), and every one blocks its tool until answered. All are kept, and the
   // oldest is the one presented: answering it surfaces the next, so none is stranded.
   readonly #permissions = new Map<string, PermissionRequest>();
+  readonly #answeredPermissions = new Set<string>();
   get permission(): PermissionRequest | undefined { return this.#permissions.values().next().value; }
+  // Requests OpenCode itself reports as pending that no captured event told this
+  // subscription about -- asked before it (re)started. Only ever adds: a request
+  // answered since is removed by its own reply event, never by being absent here, so
+  // a list read racing a fresh event cannot drop it.
+  adoptPermissions(pending: readonly PermissionRequest[]): void {
+    for (const request of pending) {
+      // A list read that raced a reply can still contain the answered request, and its
+      // reply event has already passed, so it would otherwise linger as a stale prompt.
+      if (this.#permissions.has(request.id) || this.#answeredPermissions.has(request.id)) continue;
+      if (this.#permissions.size >= 64) throw new Error("Live permission limit");
+      this.#permissions.set(request.id, request);
+    }
+  }
   // OpenCode's "todo.updated" carries the complete replacement list, so a
   // captured one is always at least as current as the last snapshot read and
   // supersedes it. Unlike a permission, the list is also readable on demand
@@ -97,8 +111,14 @@ export class LiveParts {
       // The reply event's id field wasn't directly observed live; accept
       // either name the SDK types vs. the binary's internal bus schema use.
       const repliedId = properties.permissionID ?? properties.requestID;
-      if (properties.sessionID === this.sessionId && typeof repliedId === "string" && this.#permissions.delete(repliedId)) {
-        this.reconcileSoon = true;
+      if (properties.sessionID === this.sessionId && typeof repliedId === "string") {
+        // Bounded, oldest forgotten first: only the last few answers can still race a read.
+        this.#answeredPermissions.delete(repliedId);
+        this.#answeredPermissions.add(repliedId);
+        if (this.#answeredPermissions.size > 128) {
+          for (const oldest of this.#answeredPermissions) { this.#answeredPermissions.delete(oldest); break; }
+        }
+        if (this.#permissions.delete(repliedId)) this.reconcileSoon = true;
       }
       return;
     }
