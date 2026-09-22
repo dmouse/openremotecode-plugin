@@ -2,7 +2,7 @@ import type { PluginInput } from "@opencode-ai/plugin";
 import { realpath } from "node:fs/promises";
 import { chatRequests, chatResponses, type ChatOperation, type ProjectMcpSnapshot } from "@openremotecode/protocol";
 import type { ChatStreamTarget } from "@openremotecode/protocol";
-import { ChatAccessError } from "./chat/access-error.js";
+import { ChatAccessError, ChatUnsupportedError } from "./chat/access-error.js";
 import { AnsweredQuestionMemory } from "./chat/answered-questions.js";
 import { CursorStore } from "./chat/cursor.js";
 import { fetchProjectMcpStatus } from "./chat/project-mcp-status.js";
@@ -20,8 +20,12 @@ import { openCodeEvents } from "./opencode-events.js";
 
 type Client = PluginInput["client"]
 
-export { ChatAccessError };
+export { ChatAccessError, ChatUnsupportedError };
 export interface ChatAdapter {
+  /// The capabilities this adapter actually implements. Omitted means the full chat set; an
+  /// adapter for an OpenCode build that supports less must list exactly what it supports so
+  /// the client fails explicitly instead of discovering a gap at request time.
+  readonly capabilities?: readonly string[]
   execute(operation: ChatOperation, body: Record<string, unknown>): Promise<unknown>
 }
 

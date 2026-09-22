@@ -23,7 +23,7 @@ import {
   type RelayPayload,
 } from "@openremotecode/protocol";
 
-import { ChatAccessError, type ChatAdapter } from "./chat-adapter.js";
+import { ChatAccessError, ChatUnsupportedError, type ChatAdapter } from "./chat-adapter.js";
 import { ProjectMcpSubscriptions, readProjectMcp, type ProjectMcpReader } from "./project-mcp.js";
 import { ChatStreams, type ChatStreamReader } from "./chat-stream.js";
 
@@ -64,7 +64,7 @@ export class CommandDispatcher {
   #credentialNotice: { outcome: ConnectorCredentialOutcome; occurredAt: number } | undefined;
   readonly #requests = new Map<string, { signature: string; expires: number; response: Promise<EncryptedRelayEnvelope | undefined> }>();
 
-  get capabilities(): string[] { return [SESSION_LIST_OPERATION, ...(this.#chats ? CHAT_CAPABILITIES : []),
+  get capabilities(): string[] { return [SESSION_LIST_OPERATION, ...(this.#chats ? this.#chats.capabilities ?? CHAT_CAPABILITIES : []),
     ...(this.#mcp ? PROJECT_MCP_CAPABILITIES : []), ...(this.#stream ? CHAT_STREAM_CAPABILITIES : []),
     ...CONNECTOR_CREDENTIAL_CAPABILITIES]; }
 
@@ -290,7 +290,8 @@ export class CommandDispatcher {
         const result = chatResponses[operation].parse(await this.#chats.execute(operation, body.data));
         return await this.#encryptResponse(request, operation, result);
       } catch (error) {
-        const code = error instanceof ChatAccessError ? error.code :
+        const code = error instanceof ChatUnsupportedError ? "unsupported_operation" :
+          error instanceof ChatAccessError ? error.code :
           mutations.has(operation) ? "uncertain_outcome" : "opencode_error";
         this.#log("warn", "Chat request failed", { operation, code });
         return this.#errorResponse(request, { code, message: "OpenCode could not complete the request" });

@@ -140,3 +140,26 @@ async function createRequest(client, connector, operation, body) {
     now: NOW,
   })
 }
+
+test("a chat adapter advertises its own capabilities and unsupported operations fail explicitly", async () => {
+  const { ChatUnsupportedError } = await import("../../dist/chat-adapter.js")
+  const connector = await generateConnectorIdentity(NOW)
+  const client = await generateConnectorIdentity(NOW)
+  const chats = { capabilities: ["chat.list"], execute: async (operation) => { throw new ChatUnsupportedError(operation) } }
+  const dispatcher = new CommandDispatcher({
+    connectorIdentity: connector.identity,
+    trustedClient: client.identity.publicIdentity,
+    sessions: { listSessions: async () => [] },
+    chats,
+    now: () => NOW,
+  })
+  dispatcher.setEpoch(TEST_EPOCH)
+  assert.ok(dispatcher.capabilities.includes("chat.list"))
+  assert.equal(dispatcher.capabilities.includes("chat.snapshot"), false)
+  const response = await dispatcher.handle(await createRequest(client, connector, "chat.models",
+    { version: 1, projectId: crypto.randomUUID() }))
+  assert.ok(response)
+  const payload = await decryptRelayEnvelope({ recipient: client.identity, sender: connector.identity.publicIdentity,
+    envelope: response, epoch: TEST_EPOCH, now: NOW })
+  assert.equal(payload.body.code, "unsupported_operation")
+})
