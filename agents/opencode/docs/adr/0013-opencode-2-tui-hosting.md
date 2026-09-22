@@ -237,6 +237,13 @@ needs a live model, which this environment does not have.
   real running (in-progress) v2 tool call publishes under `metadata` -- for example whether a
   live shell really uses `metadata.output` -- are therefore unverified; the fallback above is
   written to degrade safely (show nothing extra) if it does not.
+- CI runs the v2 integration test rather than skipping it. OpenCode 2 is published to npm
+  (`@opencode/cli`), not to the GitHub releases the 1.x installer reads, so CI installs the
+  pinned platform package (`@opencode/cli-linux-x64`) and `@opencode/client` outside the
+  workspace and passes both to the test by path. Depending on the platform package directly
+  avoids `@opencode/cli`'s postinstall, which resolves that same package at install time. The
+  1.x executable stays the bare `opencode` on PATH, which is what the 1.x tests resolve. Nothing
+  v2 enters the workspace's own dependencies, so the plugin still depends on no v2 package.
 - Not yet verified: the v2 `setup` inside a real interactive TUI (no TTY was available). It is
   verified against the real v2 server and the real v2 client, and the built package is verified
   to load in the real v2 loader as active with `server` and `tui` features.
