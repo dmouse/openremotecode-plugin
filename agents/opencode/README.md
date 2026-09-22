@@ -2,7 +2,7 @@
 
 This MIT-licensed package is the local OpenCode integration boundary for Open Remote Code. It loads inside a real OpenCode process, creates a persistent connector identity, completes account pairing, restores its local authorization on later launches, establishes an outbound authenticated relay connection, and serves an encrypted, read-only `session.list` operation through the supplied SDK client.
 
-The plugin connects to `https://api.openremotecode.com` by default, so the plain package name is enough:
+The plugin connects to `https://api.openremotecode.com` by default, so the plain package name is enough. OpenCode 1.x reads the `plugin` key:
 
 ```json
 {
@@ -11,7 +11,16 @@ The plugin connects to `https://api.openremotecode.com` by default, so the plain
 }
 ```
 
-Set `apiUrl` in the plugin entry of a project's `opencode.json` to select a different (for example self-hosted) Open Remote Code API service:
+OpenCode 2.x renamed the key to `plugins`. The package itself is the same; see [OpenCode 2](#opencode-2) for what the connector supports there:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": ["@openremotecode/opencode"]
+}
+```
+
+Set `apiUrl` in the plugin entry of a project's `opencode.json` to select a different (for example self-hosted) Open Remote Code API service. On 1.x this is a `[plugin, options]` tuple:
 
 ```json
 {
@@ -22,7 +31,21 @@ Set `apiUrl` in the plugin entry of a project's `opencode.json` to select a diff
 }
 ```
 
-For a local build from the workspace root, replace the package name with `./packages/agents/opencode/dist/index.js`. OpenCode 1.18.30 supports this `[plugin, options]` format. URL precedence is `apiUrl`, then `OPENCODE_REMOTE_SERVER_URL`, then the production default `https://api.openremotecode.com`. Omit `apiUrl` to keep using the environment variable. An explicitly empty, invalid, or non-string `apiUrl` rejects the remote connection and logs a configuration error while local OpenCode remains usable.
+On 2.x the same options go in an object entry:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    {
+      "package": "@openremotecode/opencode",
+      "options": { "apiUrl": "https://remote.example.com" }
+    }
+  ]
+}
+```
+
+For a local build from the workspace root, replace the package name with `./packages/agents/opencode/dist/index.js` on 1.x, or with the package directory `./packages/agents/opencode` on 2.x. The directory form matters on 2.x: the connector runs in the TUI plugin, which OpenCode resolves through the package's own `./tui` export, so an entry pointing straight at a single built file only reaches the (inert) server side. OpenCode 1.18.30 supports the `[plugin, options]` format. URL precedence is `apiUrl`, then `OPENCODE_REMOTE_SERVER_URL`, then the production default `https://api.openremotecode.com`. Omit `apiUrl` to keep using the environment variable. An explicitly empty, invalid, or non-string `apiUrl` rejects the remote connection and logs a configuration error while local OpenCode remains usable.
 
 The URL must be an origin without credentials, paths, query parameters, or fragments. HTTPS and WSS are required by default, including on loopback. Every API operation rejects redirects. Relay admission accepts only the contract's `/v1/relay` path on the configured API origin. Configuration chooses a trusted pairing destination; review project plugin configuration before loading it. Stored authorization remains bound to its original service and is never sent to a different origin. To pair separate services, use separate `OPENCODE_REMOTE_DATA_DIR` directories for their local identities and authorization.
 
@@ -43,6 +66,20 @@ First use starts a short-lived pairing authorization and displays the user code 
 `OPENCODE_REMOTE_RELAY_URL` plus `OPENCODE_REMOTE_TRUSTED_CLIENT_IDENTITY` remains a loopback-only test harness. A `ws://` harness URL also requires `OPENCODE_REMOTE_ALLOW_INSECURE_LOOPBACK=true`. The bundled demo and integration fixtures set this explicitly for their isolated development processes.
 
 The plugin includes a versioned HPKE authenticated envelope using P-256, HKDF-SHA256, and AES-256-GCM. This cryptographic selection is provisional pending a production security review; see `docs/adr/0001-hpke-relay-envelopes.md`.
+
+### Several projects on one computer
+
+OpenCode loads the plugin once per project directory, and every instance shares the same connector identity. Only one instance holds the connection to the service at a time; the others wait and take over if it exits. The connected instance serves its own directory plus the exact absolute directories in `projectDirectories`, so list every project you want to reach from the app, in the plugin entry of each project's `opencode.json`:
+
+```json
+{
+  "plugin": [
+    ["@openremotecode/opencode", { "projectDirectories": ["/home/me/project-one", "/home/me/project-two"] }]
+  ]
+}
+```
+
+The app's **Open project by path** only opens a directory that is already authorized this way. A project that is not listed is reachable only while its own instance holds the connection.
 
 ## Revoking remote access
 
@@ -70,6 +107,42 @@ The integration test uses temporary OpenCode configuration and data directories,
 
 Integration files run sequentially because concurrent cold OpenCode bootstraps
 can exceed their activation deadlines. Unit tests retain parallel execution.
+
+## OpenCode 2
+
+OpenCode 2.x is supported in a first milestone. The same package loads on 1.x and 2.x; on 2.x the
+connector runs in the TUI plugin and is available while a TUI is attached to the instance. It
+supports listing, opening and creating chats, reading message history, subtasks, live activity
+state and image attachments, and live-streaming updates (with pending permission and question
+requests, and tool/shell content when the client opts in), listing available models, text
+prompts, abort and permission/question replies; todos and prompt-time model/agent selection are
+not yet available and fail explicitly as unsupported -- todos have no discoverable v2 API at all.
+Question and subtask support each rely on an unconfirmed inference about OpenCode 2's own tools --
+see [ADR 0013](docs/adr/0013-opencode-2-tui-hosting.md) for what is and isn't verified. See
+[ADR 0013](docs/adr/0013-opencode-2-tui-hosting.md).
+
+Configure the plugin on 2.x with `"plugins"` (not `"plugin"`), and point a local build at the
+package directory rather than at `dist/index.js`, so OpenCode resolves the `./tui` export the
+connector actually runs in. See the configuration examples at the top of this file.
+
+To run the OpenCode 2 integration test, set `OPENCODE_V2_TEST_BINARY` to an OpenCode 2
+executable and `OPENCODE_V2_CLIENT` to `@opencode/client`'s `dist/promise/index.js`; it is skipped
+otherwise. OpenCode 2 is published to npm rather than to the GitHub releases the 1.x installer
+reads, so both come from there. CI installs them this way, and the same two commands work locally:
+
+```sh
+# in a scratch directory, not the workspace
+npm install --ignore-scripts --no-package-lock @opencode/cli-linux-x64@2.0.12 @opencode/client@2.0.12
+
+# in packages/agents/opencode, after pnpm run build
+OPENCODE_V2_TEST_BINARY=<scratch>/node_modules/@opencode/cli-linux-x64/bin/opencode \
+OPENCODE_V2_CLIENT=<scratch>/node_modules/@opencode/client/dist/promise/index.js \
+  node --test --test-timeout=45000 test/integration/v2-connector.test.mjs
+```
+
+`@opencode/cli` resolves the matching platform package in a postinstall step; depending on that
+platform package directly keeps the install script-free and pinned. Substitute the package for
+your own platform if it is not linux-x64.
 
 See the [current compatibility findings](docs/opencode-1.18.30-validation.md)
 and [original project investigation](docs/opencode-1.18.25-project-validation.md)
