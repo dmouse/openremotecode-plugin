@@ -33,7 +33,7 @@ export default async (context) => {
   const record = (value) => appendFile(process.env.PROJECT_TEST_RECORDS,
     JSON.stringify({ directory: context.directory, ...value }) + "\\n")
   await record({ kind: "init", projectId: context.project.id, worktree: context.worktree })
-  const hooks = await remote(context)
+  const hooks = await remote.server(context)
   return {
     ...hooks,
     event: async ({ event }) => {

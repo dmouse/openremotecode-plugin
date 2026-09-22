@@ -68,13 +68,13 @@ test("/remote revokes via HTTP and stops the running plugin relay without a rest
   const context = { directory, client: { app: { log: async (message) => { logs.push(message) } } } }
   // Restoring saved HTTP credentials must not implicitly opt into plaintext.
   process.env.OPENCODE_REMOTE_ALLOW_INSECURE_LOOPBACK = "false"
-  const blocked = await startPlugin(context, { apiUrl: origin })
+  const blocked = await startPlugin.server(context, { apiUrl: origin })
   assert.equal(blocked.dispose, undefined)
   assert.equal(tickets, 0)
   assert.equal((await store.load()).credential, credential)
   process.env.OPENCODE_REMOTE_ALLOW_INSECURE_LOOPBACK = "true"
   const connected = once(sockets, "connection", { signal: AbortSignal.timeout(3000) })
-  const hooks = await startPlugin(context, { apiUrl: origin })
+  const hooks = await startPlugin.server(context, { apiUrl: origin })
   t.after(() => hooks.dispose())
   const [socket] = await connected
   const [hello] = await once(socket, "message", { signal: AbortSignal.timeout(3000) })

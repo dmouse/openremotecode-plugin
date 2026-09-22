@@ -95,10 +95,33 @@ listed in the locally configured `projectDirectories` option. Handles belong to
 that adapter instance. No independent routing to other plugin instances is
 advertised. Remote path entry cannot expand the exact-directory policy.
 
-OpenCode may initialize another plugin instance when an approved directory is
-activated. Production accepts only one connection per account/key, so a second
-instance with the same identity is rejected; it cannot replace the active route.
-This remains a multi-directory lifecycle limitation. The native test baseline
+OpenCode initializes a plugin instance for every directory it works in, and all
+instances on a machine share one connector identity. The relay admits one
+connection per identity and evicts the older one when the identity connects
+again. Left uncoordinated, two instances evict each other in a reconnect loop, so
+neither project stays reachable and requests land on whichever instance happens
+to hold the connection, often one that does not know the requested project.
+
+Exactly one instance per state directory therefore owns the relay connection,
+guarded by a lock file in the plugin's data directory (`connector-instance.lock`).
+The owner refreshes the file's modification time every second; a lock not
+refreshed for five seconds is stale, so a crashed owner never blocks the others.
+The other instances wait and take over when the owner exits. Every refresh
+re-verifies the lock's token, so an owner suspended past the stale window stops
+its relay rather than contending. Process IDs are not used for liveness because
+they are reused and differ between containers. Pairing, credential renewal, the
+revocation retry and the connection status file are owned by the same instance,
+so a waiting instance cannot disturb them. Reconnect backoff restarts only after
+a connection has stayed admitted for ten seconds, so any remaining contender for
+the identity, such as a copied identity on another machine, backs off instead of
+retrying at the minimum delay.
+
+The owner serves only its own directory and the `projectDirectories` option, and
+authorization is never widened by another instance's presence. Every
+project that should be reachable must therefore be listed in
+`projectDirectories`, in the config of any instance that might own the
+connection. A waiting instance logs that fact once. This remains a
+multi-directory lifecycle limitation. The native test baseline
 covers the current directory. Supporting independently selected concurrent
 endpoints requires versioned opaque routing, ownership checks, separate queues,
 and lifecycle integration tests before release. Do not re-pair implicitly or
