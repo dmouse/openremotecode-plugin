@@ -29,6 +29,10 @@ interface RelayConnectionOptions {
 
 const INITIAL_RECONNECT_DELAY_MS = 250;
 const MAX_RECONNECT_DELAY_MS = 10_000;
+// A connection must stay admitted this long before the reconnect backoff starts over. The relay
+// evicts an existing connection when the same identity reconnects, so two contenders that each
+// count a momentary admission as success would retry at the minimum delay indefinitely.
+const STABLE_CONNECTION_MS = 10_000;
 // How long before the current lease's hard expiry to start renewing. The relay force-closes
 // at expiry (server/internal/relay/production.go), so this must leave enough room for a
 // ticket fetch and a full WebSocket handshake to land before that happens.
@@ -57,6 +61,7 @@ export class RelayConnection {
   #socket: WebSocket | undefined;
   #reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   #reconnectAttempts = 0;
+  #stableTimer: ReturnType<typeof setTimeout> | undefined;
   #stopped = false;
   #admitted = false;
   #nonce: string | undefined;
@@ -89,6 +94,7 @@ export class RelayConnection {
 
   async stop(): Promise<void> {
     this.#stopped = true;
+    this.#clearStableTimer();
     this.#attemptController?.abort(new Error("Plugin disposed"));
     this.#attemptController = undefined;
     if (this.#reconnectTimer) {
@@ -242,11 +248,26 @@ export class RelayConnection {
 
   #admit(socket: WebSocket): void {
     this.#admitted = true;
-    this.#reconnectAttempts = 0;
+    this.#resetBackoffWhenStable();
     this.#disconnect = this.#onReady?.((message) => this.#send(socket, message));
   }
 
+  #resetBackoffWhenStable(): void {
+    this.#clearStableTimer();
+    this.#stableTimer = setTimeout(() => {
+      this.#stableTimer = undefined;
+      this.#reconnectAttempts = 0;
+    }, STABLE_CONNECTION_MS);
+    this.#stableTimer.unref();
+  }
+
+  #clearStableTimer(): void {
+    if (this.#stableTimer) clearTimeout(this.#stableTimer);
+    this.#stableTimer = undefined;
+  }
+
   #invalidate(): void {
+    this.#clearStableTimer();
     const wasAdmitted = this.#admitted;
     this.#admitted = false;
     this.#nonce = undefined;
@@ -403,7 +424,7 @@ export class RelayConnection {
     this.#nonce = newNonce;
     this.#attemptController = undefined;
     this.#admitted = true;
-    this.#reconnectAttempts = 0;
+    this.#resetBackoffWhenStable();
     this.#renewalSocket = undefined;
     this.#renewalController = undefined;
     this.#renewalNonce = undefined;

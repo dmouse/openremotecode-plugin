@@ -80,6 +80,76 @@ test("authenticated reconnect acquires a new single-use ticket", async () => {
   }
 })
 
+test("a connection that is evicted right after admission does not reset the reconnect backoff", async () => {
+  const originalWebSocket = globalThis.WebSocket
+  const connectedAt = []
+  class EvictedWebSocket extends EventTarget {
+    static CONNECTING = 0
+    static OPEN = 1
+    static CLOSING = 2
+    static CLOSED = 3
+    readyState = EvictedWebSocket.CONNECTING
+
+    constructor() {
+      super()
+      connectedAt.push(Date.now())
+      queueMicrotask(() => {
+        this.readyState = EvictedWebSocket.OPEN
+        this.dispatchEvent(new Event("open"))
+      })
+    }
+
+    // The relay admits the connector, then evicts it because another instance with the same
+    // identity connected: the shape of two OpenCode directories sharing one identity.
+    send() {
+      if (this.readyState !== EvictedWebSocket.OPEN) return
+      queueMicrotask(() => {
+        this.dispatchEvent(new MessageEvent("message", { data: JSON.stringify({
+          protocolVersion: 2, type: "relay.ready", role: "connector", keyId: connectorKeyId,
+        }) }))
+        this.close()
+      })
+    }
+    close() {
+      if (this.readyState === EvictedWebSocket.CLOSED) return
+      this.readyState = EvictedWebSocket.CLOSED
+      this.dispatchEvent(new Event("close"))
+    }
+  }
+  globalThis.WebSocket = EvictedWebSocket
+
+  const connector = await generateConnectorIdentity()
+  const connectorKeyId = connector.identity.publicIdentity.keyId
+  const relay = new RelayConnection({
+    admissionProvider: async () => ({
+      url: new URL("wss://relay.example.test/v1/relay"),
+      protocols: ["opencode-remote.v1", `ticket.ort_${"a".repeat(43)}`],
+      expiresAt: Date.now() + 30_000,
+    }),
+    hello: {
+      protocolVersion: 2,
+      type: "connector.hello",
+      pluginVersion: "test",
+      identity: connector.identity.publicIdentity,
+      capabilities: ["session.list"],
+    },
+    log: async () => {},
+  })
+
+  try {
+    relay.start()
+    await waitFor(() => connectedAt.length === 4, 4_000)
+    const gaps = connectedAt.slice(1).map((time, index) => time - connectedAt[index])
+    // Resetting the backoff on every admission would keep every gap at the 250ms base delay
+    // (at most ~312ms with jitter), and two evicting instances would retry at ~4Hz forever.
+    assert.ok(gaps[2] >= 500, `reconnect delay must keep growing across quick evictions, got ${JSON.stringify(gaps)}`)
+    assert.ok(gaps[2] > gaps[0], `reconnect delay must keep growing across quick evictions, got ${JSON.stringify(gaps)}`)
+  } finally {
+    await relay.stop()
+    globalThis.WebSocket = originalWebSocket
+  }
+})
+
 async function waitFor(predicate, timeout = 500) {
   const deadline = Date.now() + timeout
   while (!predicate()) {
