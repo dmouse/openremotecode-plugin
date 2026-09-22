@@ -232,25 +232,34 @@ export interface QuestionRequest {
  * record" in ADR 0011) both go through this one function, so both present identically.
  * A malformed entry is dropped rather than presented empty.
  */
-function sanitizeQuestionPrompts(raw: unknown): ChatQuestion["questions"] | undefined {
-  const source = Array.isArray(raw) ? raw.slice(0, 8) : [];
-  const questions = source.map((entry: { question?: unknown; header?: unknown; multiple?: unknown; custom?: unknown
-    options?: { label?: unknown; description?: unknown }[] }) => {
-    const question = displayText(entry?.question, 2000);
-    if (!question) return undefined;
-    const options = (Array.isArray(entry?.options) ? entry.options : []).slice(0, 32)
-      .map((option) => {
-        const label = displayText(option?.label, 80);
-        const description = displayText(option?.description, 256);
-        return label ? { label, ...(description ? { description } : {}) } : undefined;
-      })
-      .filter((option): option is { label: string; description?: string } => option !== undefined);
-    if (!options.length) return undefined;
-    // OpenCode's own default: a question offers a free-text "type your own answer" unless it
-    // explicitly opts out. See ADR 0011.
-    return { header: displayText(entry?.header, 64), question, options,
-      multiple: entry?.multiple === true, custom: entry?.custom !== false };
-  }).filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
+interface QuestionPromptSource { question?: unknown; header?: unknown; multiple?: unknown; custom?: unknown
+  options?: { label?: unknown; description?: unknown }[] }
+
+// One entry, sanitized and bounded; undefined for anything that doesn't survive (no
+// presentable question text, or no presentable option). Exported separately from the batch
+// version below so a caller that must keep its own items in step with a source array
+// position-for-position (e.g. OpenCode 2's per-field form mapping, see src/v2/questions.ts)
+// can sanitize one entry at a time instead of risking a batch silently dropping one.
+export function sanitizeQuestionPrompt(entry: QuestionPromptSource): ChatQuestion["questions"][number] | undefined {
+  const question = displayText(entry?.question, 2000);
+  if (!question) return undefined;
+  const options = (Array.isArray(entry?.options) ? entry.options : []).slice(0, 32)
+    .map((option) => {
+      const label = displayText(option?.label, 80);
+      const description = displayText(option?.description, 256);
+      return label ? { label, ...(description ? { description } : {}) } : undefined;
+    })
+    .filter((option): option is { label: string; description?: string } => option !== undefined);
+  if (!options.length) return undefined;
+  // OpenCode's own default: a question offers a free-text "type your own answer" unless it
+  // explicitly opts out. See ADR 0011.
+  return { header: displayText(entry?.header, 64), question, options,
+    multiple: entry?.multiple === true, custom: entry?.custom !== false };
+}
+
+export function sanitizeQuestionPrompts(raw: unknown): ChatQuestion["questions"] | undefined {
+  const source = Array.isArray(raw) ? raw.slice(0, 8) as QuestionPromptSource[] : [];
+  const questions = source.map(sanitizeQuestionPrompt).filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
   return questions.length ? questions : undefined;
 }
 
