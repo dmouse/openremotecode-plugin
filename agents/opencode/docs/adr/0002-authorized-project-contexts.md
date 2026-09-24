@@ -9,7 +9,7 @@ now exclude sessions with a parent; child sessions are not shown in chat lists.
 ## Context
 
 Mobile will select a known project or open an existing directory by path. The
-[pinned OpenCode investigation](../opencode-1.18.25-project-validation.md) shows
+pinned OpenCode 1.18.25 investigation (removed with 1.x support, see ADR 0014) showed
 that project IDs are not workspace boundaries, directory selection initializes
 plugins, missing directories are accepted, and session-ID lookup ignores a
 different supplied directory. Default session listing also silently caps at 100.

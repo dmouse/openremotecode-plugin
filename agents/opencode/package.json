@@ -29,30 +29,28 @@
   "files": [
     "dist",
     "docs",
+    "index.js",
+    "tui.js",
     "src"
   ],
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "pnpm --filter @openremotecode/protocol build && pnpm run clean && tsc -p tsconfig.json",
     "typecheck": "pnpm --filter @openremotecode/protocol build && tsc -p tsconfig.json --noEmit",
-    "demo:connection": "pnpm run build && node scripts/dev-connection.mjs",
     "test": "pnpm run build && node --test test/unit/*.test.mjs && node --test --test-concurrency=1 --test-timeout=45000 test/integration/*.test.mjs",
     "test:unit": "pnpm run build && node --test test/unit/*.test.mjs",
     "test:integration": "pnpm run build && node --test --test-concurrency=1 --test-timeout=45000 test/integration/*.test.mjs",
-    "test:projects": "pnpm run build && node --test --test-timeout=45000 test/integration/project-behavior.test.mjs",
     "pack:check": "pnpm pack --dry-run"
   },
   "engines": {
     "node": ">=24",
-    "opencode": ">=1.18.30 <3"
+    "opencode": ">=2.0.12 <3"
   },
   "license": "MIT",
   "publishConfig": {
     "access": "public"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "1.18.30",
-    "@opencode-ai/sdk": "1.18.30",
     "@opentui/solid": "0.4.5",
     "@types/node": "^24.0.0",
     "typescript": "~5.9.3",

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
-import { boundedMessageParts, chatMessageContent, resolveImages } from "../../dist/chat-message.js"
+import { chatMessageContent, resolveImages } from "../../dist/chat-message.js"
 
 const images = JSON.parse(await readFile(new URL("../../../../protocol/test/fixtures/chat-image-v1.json", import.meta.url), "utf8"))
 
@@ -70,15 +70,4 @@ test("a resolved image that no longer fits the remaining budget falls back and m
   assert.equal(result.text, "[File: screenshot.png]\n")
   const assistantResult = chatMessageContent("assistant", [part], undefined, { images: oversized })
   assert.deepEqual(assistantResult, { text: "", truncated: true })
-})
-
-test("boundedMessageParts drops a whole image that no longer fits, never truncating its bytes", () => {
-  const fitting = { id: "img", type: "image", text: "", image: { mime: "image/jpeg", data: "x".repeat(100), width: 1, height: 1 } }
-  const filler = { id: "t", type: "text", text: "t".repeat(47950) }
-  const overflow = boundedMessageParts([filler, fitting])
-  assert.equal(overflow.parts.some((p) => p.id === "img"), false)
-  assert.equal(overflow.truncated, true)
-  const fits = boundedMessageParts([fitting, filler])
-  assert.ok(fits.parts.some((p) => p.id === "img"))
-  assert.equal(fits.text.includes("img"), false)
 })

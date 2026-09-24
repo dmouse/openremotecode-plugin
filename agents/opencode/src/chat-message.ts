@@ -1,44 +1,10 @@
-import type { FilePart, Part, ToolPart } from "@opencode-ai/sdk";
-import type { ChatImage, ChatMessagePart, ChatPermission, ChatQuestion, ChatSubtask, ChatTodo, ChatTool } from "@openremotecode/protocol";
+import type { FilePart, Part, ToolPart } from "./message-parts.js";
+import type { ChatImage, ChatMessagePart, ChatPermission, ChatQuestion, ChatSubtask, ChatTool } from "@openremotecode/protocol";
 import { IMAGE_DATA_MAX } from "@openremotecode/protocol";
 import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import sharp from "sharp";
 import { activityFor } from "./activity-adapter.js";
-
-// Rebudget normalized live replacements together with retained tool/shell/image parts.
-// The public concatenation invariant and per-message limits apply on every event.
-export function boundedMessageParts(input: ChatMessagePart[], shortened = false) {
-  const parts: ChatMessagePart[] = [];
-  let remaining = 48000;
-  for (const source of input) {
-    if (parts.length === 100 || remaining === 0) { shortened = true; break; }
-    if (source.type === "image") {
-      // Base64 image data cannot be meaningfully truncated; it either fits
-      // whole or is dropped, unlike text/shell fields sliced below.
-      if (source.image.data.length > remaining) { shortened = true; continue; }
-      remaining -= source.image.data.length;
-      parts.push(source);
-      continue;
-    }
-    const part = { ...source, text: source.text.slice(0, remaining) };
-    shortened ||= part.text.length < source.text.length;
-    remaining -= part.text.length;
-    if (part.type === "tool" && part.tool.shell) {
-      const shell = part.tool.shell;
-      const command = shell.command.slice(0, remaining);
-      remaining -= command.length;
-      const output = shell.output.slice(0, remaining);
-      remaining -= output.length;
-      const truncated = shell.truncated || command.length < shell.command.length || output.length < shell.output.length;
-      shortened ||= truncated;
-      part.tool = { ...part.tool, shell: { command, output, truncated } };
-    }
-    parts.push(part);
-  }
-  return { parts, text: parts.filter((p) => p.type !== "reasoning" && p.type !== "image").map((p) => p.text).join(""),
-    truncated: shortened };
-}
 
 // Bounded input before any decode: worst-case memory for the base64 string
 // itself, independent of the further libvips pixel-count guard below.
@@ -87,9 +53,8 @@ async function imageAttachment(part: FilePart): Promise<ChatImage | undefined> {
 }
 
 // Resolves every eligible image FilePart in one message's native parts. Only
-// ever awaited from the full snapshot path in chat-adapter.ts — never from
-// the synchronous live streaming overlay, which must not block on decode/
-// encode work. Callers gate this behind the negotiated includeImages opt-in.
+// ever awaited from the snapshot path (opencode/snapshot.ts). Callers gate
+// this behind the negotiated includeImages opt-in.
 export async function resolveImages(nativeParts: Part[]): Promise<Map<string, ChatImage>> {
   const images = new Map<string, ChatImage>();
   for (const part of nativeParts) {
@@ -117,10 +82,8 @@ function displayPath(value: unknown, directory?: string) {
 const toolOperations: Record<string, ChatTool["operation"]> = { read: "read", edit: "edit", write: "write",
   grep: "search", glob: "search", list: "list", bash: "execute", webfetch: "fetch", question: "question" };
 
-// The pinned 1.18.30 binary's actual "permission.asked" event payload --
-// confirmed via `strings` on the binary and live event capture. It does not
-// match the SDK's generated `Permission` type (no `title`/`type`/`pattern`);
-// it carries the permission kind as a bare string and patterns as an array.
+// A pending permission request, as opencode/snapshot.ts normalizes it: the
+// permission kind as a bare string and its patterns as an array.
 export interface PermissionRequest {
   id: string
   sessionID: string
@@ -128,9 +91,8 @@ export interface PermissionRequest {
   patterns?: string[]
 }
 
-// OpenCode itself never prepares a display string for this event (unlike
-// the SDK's documented but unpopulated `Permission.title`) -- only the bare
-// kind. This mirrors the phrasing OpenCode's own TUI builds for the same kinds.
+// OpenCode itself never prepares a display string for a request -- only the
+// bare kind. This mirrors the phrasing OpenCode's own TUI builds for the same kinds.
 const PERMISSION_DESCRIPTIONS: Record<string, string> = {
   external_directory: "Access an external directory", bash: "Run a shell command", edit: "Edit a file",
   write: "Write a file", read: "Read a file", grep: "Search file contents", glob: "Search for files",
@@ -139,14 +101,14 @@ const PERMISSION_DESCRIPTIONS: Record<string, string> = {
 
 // Object.hasOwn (not `?? fallback`): part.tool is attacker-influenced and a
 // bracket lookup of "__proto__"/"constructor" must not resolve off-object.
-// The `?.`/`!` below guard fields the SDK's types declare non-optional but
+// The `?.`/`!` below guard fields the part types declare non-optional but
 // native tool/reasoning state can omit in practice.
 /* eslint-disable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/no-non-null-assertion */
 function toolSummary(part: ToolPart, directory?: string, answeredQuestions: readonly AnsweredQuestionBatch[] = []): ChatTool {
   const operation = Object.hasOwn(toolOperations, part.tool) ? toolOperations[part.tool]! : "tool";
   let description = "";
   // Never forward arbitrary tool input, command strings, URLs, outputs or errors.
-  // Native tool state can omit `input` despite the SDK's non-optional type.
+  // Native tool state can omit `input` despite its non-optional type.
   if (["read", "edit", "write"].includes(operation)) {
     description = displayPath(part.state.input?.filePath, directory);
   } else if (operation === "search") {
@@ -159,7 +121,7 @@ function toolSummary(part: ToolPart, directory?: string, answeredQuestions: read
     // the live pending banner is (see ADR 0011) -- never the tool's native output/metadata.
     const questions = sanitizeQuestionPrompts(part.state.input?.questions);
     if (questions) {
-      // Matched by sanitized content, not a native id: this pinned event payload carries
+      // Matched by sanitized content, not a native id: a completed tool part carries
       // none. See ADR 0011, "Update: a persisted asked/answered record".
       const matched = answeredQuestions.find((batch) =>
         JSON.stringify(batch.questions) === JSON.stringify(questions));
@@ -215,7 +177,7 @@ export function subtaskSummary(part: ToolPart): ChatSubtask {
 // Only a bounded, locally-built description and the request's own patterns
 // cross this boundary. The raw metadata and "always"/save fields (a
 // persistent grant) are never forwarded. See CHAT-PERMISSIONS.md.
-// OpenCode's "question.asked" payload. The question text and option labels are authored
+// A pending question batch. The question text and option labels are authored
 // by the model, so they are the one place agent-written text is deliberately forwarded --
 // see ADR 0011. Everything here is sanitized and capped before it leaves the plugin.
 export interface QuestionRequest {
@@ -238,7 +200,7 @@ interface QuestionPromptSource { question?: unknown; header?: unknown; multiple?
 // One entry, sanitized and bounded; undefined for anything that doesn't survive (no
 // presentable question text, or no presentable option). Exported separately from the batch
 // version below so a caller that must keep its own items in step with a source array
-// position-for-position (e.g. OpenCode 2's per-field form mapping, see src/v2/questions.ts)
+// position-for-position (e.g. the per-field form mapping in src/opencode/questions.ts)
 // can sanitize one entry at a time instead of risking a batch silently dropping one.
 export function sanitizeQuestionPrompt(entry: QuestionPromptSource): ChatQuestion["questions"][number] | undefined {
   const question = displayText(entry?.question, 2000);
@@ -295,39 +257,6 @@ export function permissionSummary(permission: PermissionRequest): ChatPermission
   /* eslint-enable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/no-non-null-assertion */
 }
 
-const TODO_STATUSES: readonly ChatTodo["status"][] = ["pending", "in_progress", "completed", "cancelled"];
-
-// OpenCode's own per-session task list, projected through the same
-// presentation allowlist every other field here uses: the item's id, its
-// sanitized text, and a strict status. The native `priority` -- and any other
-// native field -- stays local. OpenCode types `status` as a bare string, so an
-// unrecognized value is presented as "pending" rather than forwarded or
-// dropping the item. Items keep OpenCode's own order. See CHAT-TODOS.md.
-export function todoSummaries(native: unknown): ChatTodo[] {
-  if (!Array.isArray(native)) return [];
-  const todos: ChatTodo[] = [];
-  const seen = new Set<string>();
-  for (const [index, value] of (native as unknown[]).entries()) {
-    if (todos.length === 100) break;
-    if (!value || typeof value !== "object") continue;
-    const { id, content, status } = value as Record<string, unknown>;
-    const text = displayText(content);
-    if (!text) continue;
-    // The SDK's generated `Todo` type declares an `id`, but the pinned
-    // 1.18.30 binary never sends one: its own storage keys a todo by
-    // (session, position), and `GET /session/{id}/todo` returns
-    // {content, status, priority} only -- confirmed against a live server.
-    // The item's place in the list is therefore its identity here. A future
-    // build that does supply an id is preferred over the positional one.
-    const key = typeof id === "string" && id && id.length <= 128 ? id : `todo-${String(index)}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    todos.push({ id: key, content: text,
-      status: TODO_STATUSES.includes(status as ChatTodo["status"]) ? status as ChatTodo["status"] : "pending" });
-  }
-  return todos;
-}
-
 // Only presentation fields cross this boundary. Shell command/output is an
 // explicit opt-in exception; other native metadata and tool output stay local.
 // Synthetic text includes OpenCode's expanded attachment context, not user prose.
@@ -364,8 +293,7 @@ export function chatMessageContent(role: string, nativeParts: Part[], subtasks?:
       }
       continue;
     }
-    if (part.type !== "text" && part.type !== "tool" &&
-        !(role === "assistant" && part.type === "reasoning")) continue;
+    if (part.type === "reasoning" && role !== "assistant") continue;
     if (parts.length === 100 || remaining === 0) { truncated = true; break; }
     const source = part.type === "tool" ? `[Tool: ${part.tool} · ${part.state.status}]\n`
       : part.type === "text" ? part.text + "\n" : part.text;
@@ -373,7 +301,7 @@ export function chatMessageContent(role: string, nativeParts: Part[], subtasks?:
     remaining -= text.length;
     truncated ||= text.length < source.length;
     if (part.type === "reasoning") {
-      // Native reasoning parts can omit `time` despite the SDK's non-optional type.
+      // Native reasoning parts can omit `time` despite its non-optional type.
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       const { start, end } = part.time ?? {};
       const validStart = Number.isSafeInteger(start) && start >= 0;
@@ -399,7 +327,7 @@ export function chatMessageContent(role: string, nativeParts: Part[], subtasks?:
           remaining -= result.length;
           return result;
         };
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- native tool state can omit `input` despite the SDK's non-optional type
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- native tool state can omit `input` despite its non-optional type
         const command = bounded(part.state.input?.command, 8000);
         // Native shell streaming uses metadata.output. Only this specific field
         // is projected, not the metadata object or a referenced output file.

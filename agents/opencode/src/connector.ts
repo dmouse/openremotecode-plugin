@@ -13,12 +13,11 @@ import {
   FileConnectorIdentityStore,
   resolveConnectorIdentityPath,
 } from "./crypto/identity-store.js";
-import type { ChatAdapter } from "./chat-adapter.js";
 import type { ChatStreamReader } from "./chat-stream.js";
 import { resolveConnectorInstanceLockPath, superviseOwnership } from "./instance-lock.js";
-import type { SessionReader } from "./opencode-adapter.js";
+import type { ChatAdapter, SessionReader } from "./chat-adapter.js";
 import type { ProjectMcpReader } from "./project-mcp.js";
-import { PairingClient } from "./pairing-client.js";
+import { PairingClient, PairingRejectedError } from "./pairing-client.js";
 import { supervisePairing } from "./pairing-supervisor.js";
 import { RelayConnection, type RelayLogLevel } from "./relay-connection.js";
 import { RemoteAPIClient } from "./remote-api-client.js";
@@ -29,9 +28,9 @@ const PLUGIN_VERSION = "0.1.0";
 const RELAY_URL_ENVIRONMENT_VARIABLE = "OPENCODE_REMOTE_RELAY_URL";
 const TRUSTED_CLIENT_ENVIRONMENT_VARIABLE = "OPENCODE_REMOTE_TRUSTED_CLIENT_IDENTITY";
 
-/// Everything the connector needs from the OpenCode generation that loaded it. The lifecycle
-/// below (identity, pairing, relay, ownership) is identical across generations; only how it
-/// logs, notifies and reads chats differs, and that lives behind this interface.
+/// Everything the connector needs from its host. The lifecycle below (identity, pairing, relay,
+/// ownership) knows nothing about OpenCode; how it logs, notifies and reads chats lives behind
+/// this interface.
 export interface ConnectorAdapters {
   sessions: SessionReader
   chats: ChatAdapter
@@ -50,6 +49,11 @@ export interface ConnectorHost {
   options: Record<string, unknown>
   log: (level: RelayLogLevel, message: string, extra?: Record<string, unknown>) => Promise<void>
   notify: (notification: ConnectorNotification) => Promise<void>
+  /**
+   * Asks the person at this machine a yes/no question. Pairing uses it to approve a device;
+   * only an explicit `true` counts as consent, so a dismissed dialog rejects.
+   */
+  confirm: (question: { title: string; message: string }) => Promise<boolean | undefined>
   adapters: () => ConnectorAdapters
 }
 
@@ -208,19 +212,22 @@ export async function startConnector(host: ConnectorHost): Promise<ConnectorHand
               durationMs: remainingDuration(expiresAt),
             });
           },
-          showSafetyCode: async (code, expiresAt) => {
-            await host.notify({
-              title: "Verify pairing safety code",
-              message: code,
-              variant: "warning",
-              durationMs: remainingDuration(expiresAt),
-            });
-          },
+          approveDevice: async (code) => await host.confirm({
+            title: "Allow this phone to control OpenCode?",
+            message: `A phone is asking to pair with this OpenCode. Approve only if the Open Remote Code app ` +
+              `shows exactly this safety code:\n\n${code}\n\nOnce paired it can read your chats and send prompts ` +
+              `here. If you did not just enter the pairing code in your own app, decline.`,
+          }) === true,
         });
         pairingTask = supervisePairing({
           pair: (signal) => pairing.pair(signal),
           onPaired: startAuthorizedRelay,
           onFailure: (error) => {
+            if (error instanceof PairingRejectedError) {
+              void host.notify({ title: "Pairing rejected", variant: "info", durationMs: 10_000,
+                message: "The phone was not paired. A new pairing code will appear shortly." });
+              return;
+            }
             deferLog(log, "warn", "Connector pairing did not complete; retrying", { error: errorMessage(error) });
           },
           signal: pairingController.signal,

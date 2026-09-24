@@ -1,4 +1,4 @@
-import type { Part } from "@opencode-ai/sdk";
+import type { Part } from "./message-parts.js";
 import type { Activity } from "@openremotecode/protocol";
 
 // Host-specific names stay here, never in the mobile presentation registry.
@@ -11,7 +11,7 @@ import type { Activity } from "@openremotecode/protocol";
 // cancelled (tools) or unknown (reasoning) instead of as live work.
 export function activityFor(part: Part, messageFinished = false, sessionSettled = false): Activity | undefined {
   if (part.type === "reasoning") {
-    // Native reasoning parts can omit `time` despite the SDK's non-optional type.
+    // Native reasoning parts can omit `time` despite its non-optional type.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     const { start, end } = part.time ?? {};
     const validStart = Number.isSafeInteger(start) && start >= 0;

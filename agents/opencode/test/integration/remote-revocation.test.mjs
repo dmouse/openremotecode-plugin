@@ -10,7 +10,6 @@ import { WebSocketServer } from "ws"
 
 import { FileConnectorAuthorizationStore } from "../../dist/auth/authorization-store.js"
 import { FileConnectorIdentityStore } from "../../dist/crypto/identity-store.js"
-import startPlugin from "../../dist/index.js"
 import tuiPlugin from "../../dist/tui.js"
 
 test("/remote revokes via HTTP and stops the running plugin relay without a restart", async (t) => {
@@ -64,48 +63,52 @@ test("/remote revokes via HTTP and stops the running plugin relay without a rest
     connectorKeyId: identity.publicIdentity.keyId, credential,
     credentialExpiresAt: new Date(Date.now() + 60_000).toISOString(), trustedClient: identity.publicIdentity,
   })
-  const logs = []
-  const context = { directory, client: { app: { log: async (message) => { logs.push(message) } } } }
+  const toasts = []
+  let command
+  const shown = []
+  const script = ["details", "revoke", true, "close"]
+  // The TUI context the connector is set up with: `/remote` is registered through a keymap layer
+  // created inside the `app` slot's render, and every dialog answers with the next scripted step.
+  const context = {
+    options: { apiUrl: origin },
+    location: { directory },
+    client: {},
+    data: { location: { default: () => ({ directory }) } },
+    keymap: { layer(input) { command = input().commands[0] } },
+    ui: {
+      toast: { show: (toast) => { toasts.push(toast) } },
+      slot: (claim) => { if (claim.append === "app") claim.render(); return () => {} },
+      dialog: {
+        select: async (options) => { shown.push(options); return script.shift() },
+        confirm: async () => script.shift(),
+        alert: async () => {},
+      },
+    },
+  }
   // Restoring saved HTTP credentials must not implicitly opt into plaintext.
   process.env.OPENCODE_REMOTE_ALLOW_INSECURE_LOOPBACK = "false"
-  const blocked = await startPlugin.server(context, { apiUrl: origin })
-  assert.equal(blocked.dispose, undefined)
+  const blocked = await tuiPlugin.setup(context)
+  await blocked()
   assert.equal(tickets, 0)
   assert.equal((await store.load()).credential, credential)
   process.env.OPENCODE_REMOTE_ALLOW_INSECURE_LOOPBACK = "true"
   const connected = once(sockets, "connection", { signal: AbortSignal.timeout(3000) })
-  const hooks = await startPlugin.server(context, { apiUrl: origin })
-  t.after(() => hooks.dispose())
+  const cleanup = await tuiPlugin.setup(context)
+  t.after(() => cleanup())
   const [socket] = await connected
   const [hello] = await once(socket, "message", { signal: AbortSignal.timeout(3000) })
   assert.equal(JSON.parse(hello.toString()).identity.keyId, identity.publicIdentity.keyId)
   socket.send(JSON.stringify({ protocolVersion: 2, type: "relay.ready", role: "connector", keyId: identity.publicIdentity.keyId }))
   const closed = once(socket, "close", { signal: AbortSignal.timeout(3000) })
-  let command, dialog
-  const controller = new AbortController()
-  t.after(() => controller.abort())
-  await tuiPlugin.tui({
-    theme: { current: { success: "#a3d977", textMuted: "#888888", text: "#ffffff" } },
-    slots: { register() { return "status-chip" } },
-    keymap: { registerLayer(layer) { command = layer.commands[0]; return () => {} } },
-    lifecycle: { signal: controller.signal, onDispose() {} },
-    ui: {
-      DialogSelect: (props) => props, DialogConfirm: (props) => props,
-      dialog: { setSize() {}, replace(render) { dialog = render() }, clear() {} },
-    },
-  })
   await command.run()
-  assert.equal(dialog.options.some((option) => option.value === "revoke"), false)
-  dialog.onSelect(dialog.options.find((option) => option.value === "details"))
-  assert.equal(dialog.title, "Active token details")
-  dialog.onSelect({ value: "revoke" })
-  dialog.onConfirm()
+  assert.equal(shown[0].options.some((option) => option.value === "revoke"), false)
+  assert.equal(shown[1].title, "Active token details")
   // The simulated service intentionally leaves the socket open: the local plugin must stop it.
   await closed
   assert.equal(revoked, true)
   assert.equal(await store.load(), undefined)
-  assert.equal(dialog.options[0].title, "Remote access revoked")
+  assert.equal(shown.at(-1).options[0].title, "Remote access revoked")
   await delay(600)
   assert.equal(tickets, 1)
-  assert.equal(JSON.stringify(logs).includes(credential), false)
+  assert.equal(JSON.stringify(toasts).includes(credential), false)
 })

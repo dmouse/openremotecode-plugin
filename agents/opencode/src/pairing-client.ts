@@ -13,7 +13,19 @@ import { type RemoteAPIClient, type PairingPoll } from "./remote-api-client.js";
 
 interface PairingDisplay {
   showPairing(userCode: string, verificationURI: string, expiresAt: string): Promise<void>
-  showSafetyCode(code: string, expiresAt: string): Promise<void>
+  /**
+   * Shows the safety code and asks the person at this machine to approve the device that
+   * claimed the pairing. Resolves true only on an explicit approval; anything else rejects.
+   */
+  approveDevice(code: string, expiresAt: string): Promise<boolean>
+}
+
+/** Thrown when the person at OpenCode declines the device, so the supervisor can say so. */
+export class PairingRejectedError extends Error {
+  constructor() {
+    super("Pairing was rejected in OpenCode");
+    this.name = "PairingRejectedError";
+  }
 }
 
 export class PairingClient {
@@ -51,7 +63,10 @@ export class PairingClient {
     await this.display.showPairing(pairing.userCode, pairing.verificationUri, pairing.expiresAt);
 
     let trustedClient;
-    let displayedSafetyCode: string | undefined;
+    // Approval is asked once per pairing, and the answer is remembered so a failed approve
+    // request is retried on the next poll without asking again.
+    let approved = false;
+    let approvalRecorded = false;
     while (Date.now() < Date.parse(pairing.expiresAt)) {
       await abortableDelay(pairing.pollIntervalSeconds * 1_000, signal);
       let state: PairingPoll;
@@ -85,10 +100,25 @@ export class PairingClient {
           throw new Error("Pairing transcript changed during verification");
         }
         trustedClient = state.transcript.deviceIdentity;
-        const safetyCode = await derivePairingSafetyCode(state.transcript);
-        if (displayedSafetyCode !== safetyCode) {
-          displayedSafetyCode = safetyCode;
-          await this.display.showSafetyCode(safetyCode, state.expiresAt);
+        // The server completes a pairing only after this approval, so a person who merely
+        // saw or guessed the user code cannot bind this OpenCode to their own account.
+        if (state.status === "verification" && !approved) {
+          const safetyCode = await derivePairingSafetyCode(state.transcript);
+          if (!await this.display.approveDevice(safetyCode, state.expiresAt)) {
+            await this.api.cancelPairing(pairing.pairingId, pairing.pairingSecret).catch(() => {});
+            await this.pairingStore.clear();
+            throw new PairingRejectedError();
+          }
+          approved = true;
+        }
+        if (state.status === "verification" && !approvalRecorded) {
+          try {
+            await this.api.approvePairing(pairing.pairingId, pairing.pairingSecret, trustedClient.keyId);
+            approvalRecorded = true;
+          } catch (error) {
+            if (signal.aborted) throw error;
+            // Retried on the next poll; the user's answer is kept.
+          }
         }
       }
       if (state.status !== "completed") continue;

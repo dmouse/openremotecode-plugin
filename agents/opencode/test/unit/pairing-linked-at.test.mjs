@@ -24,7 +24,7 @@ test("completed pairing persists the server's original linking date", async () =
   let saved, cleared = false
   const client = new PairingClient(api, identity, { replace: async (value) => { saved = value } },
     { load: async () => pairing, clear: async () => { cleared = true } },
-    { showPairing: async () => {}, showSafetyCode: async () => {} })
+    { showPairing: async () => {}, approveDevice: async () => true })
   const result = await client.pair(new AbortController().signal)
   assert.equal(result.linkedAt, linkedAt)
   assert.equal(saved.linkedAt, linkedAt)

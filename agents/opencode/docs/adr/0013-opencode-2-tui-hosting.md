@@ -2,6 +2,9 @@
 
 Status: accepted (eighth milestone: activities and images; todos found unsupportable)
 
+The dual-generation packaging below is superseded by [ADR 0014](0014-opencode-2-only.md): the
+plugin now supports OpenCode 2 only, and `src/v2/` is now `src/opencode/`.
+
 OpenCode 2.0.x replaced the plugin contract. A v1 plugin is a function returning hooks; a v2
 plugin default-exports `{ id, setup(context) }`. OpenCode 2.0.12 rejected this package's
 function export with `Plugin must export a default definition with an id and an effect or setup
@@ -27,6 +30,89 @@ conflicts with least privilege.
 The v2 server-side `setup` is inert. The TUI entry keeps the v1 OpenTUI interface behind a lazy
 import so a v2 TUI never resolves it.
 
+### Two hosts, two entries, and which one carries the connector
+
+OpenCode 2 runs plugins in two hosts, and hands each a different file from the same directory:
+`index.js` to the **server** host and `tui.js` to the **TUI** host. Only the TUI host's context
+carries the client the chat adapters need, the toast surface, `keymap` and `ui.dialog`; the server
+host's has none of them (`keymap` and `ui.dialog` are simply `undefined` there). This is what the
+package's two root entries are for, and it is why the connector is re-exported from `tui.js`.
+
+How a plugin is declared decides which hosts see it, and the difference is not documented
+upstream: a `plugins` entry in `opencode.json` was loaded **only in the server host** in every run
+here, while a directory under `<project>/.opencode/plugins/` or `<config>/opencode/plugins/` was
+loaded in **both**. A config entry therefore yields an inert connector -- it starts, writes an
+identity and takes the ownership lock, then has no client to serve chats with and no way to offer
+`/remote`. The supported local install on 2.x is consequently a plugin directory, not a config
+entry. A symlinked directory was not discovered at all; a real directory whose `index.js` and
+`tui.js` re-export the built package works.
+
+### `/remote` on the v2 TUI
+
+v1 registers its command and status chip through OpenTUI (`src/tui-v1.ts`); v2 has no counterpart,
+so until now 2.x had no `/remote` at all -- and therefore no local kill switch, the one control
+the trust model says must not depend on the service or the phone. It is now registered from
+`src/v2/setup.ts` against the real 2.x API, with two constraints found by testing rather than by
+reading the types:
+
+- A keymap layer belongs to the component that creates it. Registering from `setup()` throws
+  `Keymap.Provider is missing`, and that exception aborted setup before the connector started --
+  a UI convenience taking down the connector. The layer is now created inside a render claimed on
+  the always-mounted `app` slot, and the whole registration is wrapped so it can only cost the
+  command, never the connector.
+- The layer must be `mode: "global"`. The default `base` mode is unreachable while the prompt has
+  focus, which is exactly where a slash command is offered: the same command is absent from slash
+  completion without it and present with it.
+
+The dialog itself (`src/v2/remote-dialog.ts`) is a loop over awaited choices rather than v1's tree
+of rendered callbacks, because v2's dialogs resolve once and cannot be updated in place. One
+consequence: a legacy authorization's linking date is looked up once before the details open and
+degrades to "Date unavailable", where v1 shows "Loading…" and fills it in afterwards.
+
+The **⊙ Remote** indicator is v1's chip unchanged: `src/tui-status-indicator.ts` now holds the
+state machine, the 3s poll and the element tree once (`startRemoteStatusChip`), and each
+generation only says where to claim it and how its theme names colors. On 2.x it is claimed on
+`home.footer.status` and `prompt.footer.status` and colored from `text.feedback.success.base` /
+`text.muted` / `text.base`. It is built imperatively through `@opentui/solid`, as v1's is, with no
+JSX transform -- which only works because the v2 TUI host provides that module to plugins: a
+plugin directory with no dependencies of its own resolves the bare import, and elements built from
+it render on the host's screen (verified against 2.0.14, including from this package's own
+directory). The module is imported lazily so the server host never loads it. Verified live: the
+chip renders beside the working directory on the home footer, dot muted and label in the text
+color for an authorized connector that is not connected. The connected (green) state is the same
+code with a different token and was not reachable here without a live relay.
+
+Both generations now share `src/remote-access.ts` -- status, the revoke sequence and pairing
+regeneration. Revocation is the reason: two implementations of a kill switch are two chances to
+get the ordering wrong, and the ordering (queue the credential, clear pairing, identity and
+authorization locally, only then tell the service) is the whole security property.
+
+### How OpenCode 2 actually resolves this package
+
+A directory is resolved as `<directory>/index.js` (server host) and `<directory>/tui.js` (TUI
+host). The loader reads neither `main` nor `exports`, so the package's two root entries -- the
+server definition and the TUI definition respectively -- are what load, and `package.json`
+decides nothing here.
+The two failure modes are asymmetric and only one is diagnosable: a path pointing at a file is
+refused with `configured plugin path must be a directory`, while a directory without a root
+`index.js` is skipped in complete silence -- no log line at any level, no error, no toast. This
+package had exactly that shape (entry at `dist/index.js`, no root entry) and so never loaded on
+2.x at all; the earlier belief that the directory form made OpenCode resolve the `./tui` export
+was wrong. Verified against 2.0.14 by bisecting a minimal plugin: identical code loads with
+`main: "index.js"` and is skipped with `main: "./dist/index.js"` until a root `index.js` exists.
+
+(Superseded: an earlier revision pointed the root `index.js` at the TUI definition, which made
+the connector start inside the server host, where it has no client and no UI. The two-host
+section above is the current shape.)
+
+Unresolved: an entry naming the **published package** by name resolved to the `.` export
+(`dist/index.js`, whose v2 setup is inert), not to the root entry, so a normal npm install may
+still not start the connector on 2.x. That was observed against 0.1.4, which predates the root
+entry and the dual-shape export and is rejected outright by 2.x
+(`Plugin must export a default definition with an id and an effect or setup function`), so it
+proves nothing about a build that has both. Re-verify it against the next publish before
+claiming npm-installed 2.x support.
+
 ## Consequences and limits
 
 - The phone can reach a v2 instance only **while a TUI is attached to it**. A headless
@@ -37,8 +123,9 @@ import so a v2 TUI never resolves it.
   opt-ins), `chat.models`, `chat.stream.subscribe`/`chat.stream.unsubscribe`, `chat.prompt`
   (text only), `chat.abort`, `chat.permission.reply` and `chat.question.reply`. The connector
   advertises exactly that set. Everything else, including todos, rename/fork/delete and project
-  MCP status, fails as `unsupported_operation`. `mode` and `model` on a prompt are refused rather
-  than silently dropped.
+  MCP status, fails as `unsupported_operation`. A prompt's Build/Plan `mode` is supported (below);
+  its `model` is refused rather than silently dropped. (Superseded: see "Update: model
+  selection" below.)
 
 ### Activities and images
 
@@ -187,11 +274,32 @@ needs a live model, which this environment does not have.
   `model.list()` answers empty until that location has been resolved at least once. Neither
   omitting `location` nor calling `session.list` first does this; only `client.location.get(...)`
   does, confirmed by testing all three against a real 2.0.12 server. `chat.models` calls it before
-  every `model.list()`. Prompt-time model or agent selection is not implemented in this milestone:
-  v2 has no per-prompt model override at all (`SessionPromptInput` carries no `model` field);
-  the equivalent is `session.switchModel`/`session.switchAgent`, which persist for the whole
-  session rather than one turn -- a real semantic mismatch with v1's `chat.prompt.model`, not
-  just a missing field, so it stays refused pending its own design.
+  every `model.list()`. v2 has no per-prompt model or agent at all (`SessionPromptInput` carries
+  neither); the equivalents are `session.switchModel`/`session.switchAgent`, which persist for the
+  whole session rather than one turn. That mismatch matters for the model and not for the mode,
+  because the two are sent differently: a client that negotiated `chat.prompt.mode` names the mode
+  on **every** prompt (the mobile app defaults it to Build), so switching the agent before each
+  prompt yields exactly the per-turn result -- while a model is sent only when one was picked, so
+  a persistent switch would carry it into later turns that asked for none. `chat.prompt.mode` is
+  therefore advertised and implemented as `switchAgent` then `prompt`, awaited in that order so
+  the turn cannot start on the previous agent, and a failed switch fails the prompt rather than
+  running it in the wrong mode; `chat.prompt.model` stays refused. The switch is skipped when the
+  session already runs the requested agent: OpenCode records each switch in the chat's history,
+  so one per mobile prompt would otherwise pile up in the desktop view. Verified against a real
+  2.0.14 server: the switch is recorded before the prompt, `session.agent` tracks it, a repeated
+  mode records nothing, and a change records exactly one entry.
+
+  **Update: model selection.** `chat.prompt.model` is now advertised and implemented as
+  `switchModel`, with the effort as the model's `variant`. The concern above assumed a client
+  sends a model only on the turn it was picked. The mobile app sends its selection on every
+  prompt once one is picked, and restores it from the snapshot's recovered `model` when a chat
+  is reopened. A prompt without a model then runs on the session's current model, which is what
+  the desktop TUI shows too. Order and failure rules: the model and effort are validated against
+  a fresh `model.list()` before anything is switched (a model or effort no longer listed fails as
+  `context_expired`, leaving agent and model untouched), the agent is switched first, then the
+  model, then the prompt is sent. The model switch is skipped when `session.model` already
+  matches, except right after an agent switch, which may apply that agent's own model. Verified
+  against a real 2.0.14 server: `session.model` reports the selected model and variant afterwards.
 - Streaming reuses `ChatStreams` (`src/chat-stream.ts`) unchanged: it is already generic over a
   `ChatStreamReader` (`readChat`/`watchChat`), so it needed no v2-specific code. The v2 adapter
   implements that interface directly. Unlike v1, whose root SDK client cannot reach the embedded
@@ -199,9 +307,24 @@ needs a live model, which this environment does not have.
   already exposes a typed `event.subscribe()` async iterable (`src/v2/event-source.ts`), so no
   transport shim was needed.
 - `watchChat` verifies session membership once, then treats every event carrying the target's
-  `sessionID` as "changed" and re-reads a fresh `chat.snapshot` -- no per-part live overlay
+  session as "changed" and re-reads a fresh `chat.snapshot` -- no per-part live overlay
   (no `LiveParts` equivalent) in this milestone, since `chat.snapshot` itself does not project
-  streaming deltas yet. `ChatStreams`' own diffing and 100ms coalescing already batch a burst of
+  streaming deltas yet. An event's session is resolved from `data.sessionID`, `data.part`,
+  `data.info` or `data.info.id`, the same four places v1 looks: message-level events carry it
+  only inside the part or message they are about, so matching the top-level field alone left a
+  chat that refreshed when the session was renamed but not while a reply was being written.
+  Only the rename path is exercised against the real server (see the streaming step in
+  `test/integration/v2-connector.test.mjs`); the nested shapes are covered by unit tests.
+- A stream read forwards every content opt-in the subscription negotiated, exactly as a direct
+  `chat.snapshot` carries it. Forwarding only `includePermissions` (as the first streaming
+  milestone did) was a real regression rather than a scoping decision: the client merges stream
+  updates over its own history, so tools, shell, activities, images and subtasks vanished from a
+  chat the moment it subscribed, a pending question read as "none" because it was never asked
+  for and so could not be answered while streaming, and the client suppresses its own polling
+  while a stream is live, so nothing restored any of it until the subscription ended.
+  `includeTodos` is the one flag not forwarded: v2 refuses it, and failing the whole stream over
+  a flag the connector never advertised is worse than serving the rest of the snapshot without
+  it. `ChatStreams`' own diffing and 100ms coalescing already batch a burst of
   events into one update. `server.connected` unblocks the caller's first read the same way v1's
   does; `location.shutdown` is v2's counterpart to v1's `server.instance.disposed` and ends the
   stream as fatal. A subtask target (`parentSessionId` set) is refused as unsupported before any
@@ -217,7 +340,21 @@ needs a live model, which this environment does not have.
   with the generic "Permission requested" description rather than as a specific operation.
 - A snapshot still shows only what OpenCode has stored (`chat.snapshot` has no in-progress text
   or reasoning content), so a running reply is invisible until it completes and a stream update
-  fires. A busy session is reported as `busy`.
+  fires. A session v2 reports as `running` is `busy`; only a session absent from v2's own active
+  map is `idle`, and a state this build has never seen is `unknown`. The distinction is not
+  cosmetic: `sessionSettled` reads idle as proof that an interrupted tool call was abandoned
+  (ADR 0012), so collapsing an unfamiliar busy state into idle would present a working session's
+  tool calls as dead. For the same reason a question list that could not be read is not a
+  session with no pending question: `fetchPendingV2Question` distinguishes "none" from "could
+  not tell", and only the first settles a session.
+- Content shapes this build has never seen are skipped, never thrown on. The message filter
+  above guards message kinds; the converter (`message-history.ts`) now does the same one level
+  down, for an unrecognized assistant content kind, a tool status outside the pinned enum, and a
+  user message carrying attachments but no text of its own. Without that, one unfamiliar part
+  inside one message made the entire chat unreadable -- the opposite of the rule the message
+  filter exists to enforce. A tool whose status cannot be read is omitted rather than shown as
+  running or finished, the same fail-safe-by-omission used for an unrecognized permission,
+  question form or tool.
 - I could not reproduce a real pending (`ask`-effect) permission through the v2 API in this
   environment: `permission.create` returned `deny` even with a matching `{action:"*",
   resource:"*", effect:"ask"}` config rule, seemingly because it needs a real in-flight tool call

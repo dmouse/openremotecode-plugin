@@ -71,6 +71,18 @@ export class RemoteAPIClient {
     ));
   }
 
+  /** Records the approval given in OpenCode, bound to the device key the user was shown. */
+  async approvePairing(pairingId: string, pairingSecret: string, deviceKeyId: string): Promise<void> {
+    await this.#request(
+      `/v1/connector-pairings/${encodeURIComponent(pairingId)}/approve`,
+      {
+        method: "POST",
+        headers: { Authorization: `Pairing ${pairingSecret}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceKeyId }),
+      },
+    );
+  }
+
   async cancelPairing(pairingId: string, pairingSecret: string): Promise<void> {
     await this.#request(
       `/v1/connector-pairings/${encodeURIComponent(pairingId)}/cancel`,

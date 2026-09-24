@@ -47,14 +47,15 @@ The adapter is expected to support session listing, session creation, message sn
 
 Raw OpenCode events are often partial or optimized for a local client. Convert them into stable events and use SDK snapshots when state must be reconstructed.
 
-## OpenCode 2
+## Supported OpenCode
 
-OpenCode 2 replaces the plugin contract and gives a server plugin too little API to serve chats, so
-on 2.x the connector runs in the TUI plugin over the client it is given (`src/v2/`, entry
-`src/tui.ts`), sharing the lifecycle in `src/connector.ts` with the 1.x server plugin. A v2 adapter
-advertises only the operations it implements and fails the rest as `unsupported_operation`; it must
-never widen access by reading OpenCode's server URL or credentials from disk. See
-`docs/adr/0013-opencode-2-tui-hosting.md`.
+The plugin supports OpenCode 2 only. OpenCode gives a server plugin too little API to serve chats,
+so the connector runs in the TUI plugin over the client it is given (`src/opencode/`, entry
+`src/tui.ts`); the server entry is inert. The lifecycle in `src/connector.ts` stays independent
+of OpenCode. The adapter advertises only the operations it implements and fails the rest as
+`unsupported_operation`; it must never widen access by reading OpenCode's server URL or
+credentials from disk. See `docs/adr/0013-opencode-2-tui-hosting.md` and
+`docs/adr/0014-opencode-2-only.md`.
 
 ## Remote Capability Policy
 

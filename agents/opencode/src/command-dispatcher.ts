@@ -23,11 +23,9 @@ import {
   type RelayPayload,
 } from "@openremotecode/protocol";
 
-import { ChatAccessError, ChatUnsupportedError, type ChatAdapter } from "./chat-adapter.js";
+import { ChatAccessError, ChatUnsupportedError, type ChatAdapter, type SessionReader } from "./chat-adapter.js";
 import { ProjectMcpSubscriptions, readProjectMcp, type ProjectMcpReader } from "./project-mcp.js";
 import { ChatStreams, type ChatStreamReader } from "./chat-stream.js";
-
-import type { SessionReader } from "./opencode-adapter.js";
 
 interface CommandDispatcherOptions {
   connectorIdentity: ConnectorIdentity

@@ -38,8 +38,12 @@ accepts the `model` field. Dispatching `chat.prompt.model` directly returns
 Mobile should offer model/effort selection only when the active connector
 advertises `chat.models`, `chat.prompt`, and `chat.prompt.model` together. Without
 all three, omit `model` from `chat.prompt` and do not promise selection -- the
-existing text-only and mode-only clients remain valid; omission leaves OpenCode's
-local default model in effect. Recheck capabilities after reconnect. As with mode,
+existing text-only and mode-only clients remain valid; omission leaves the
+session's current model in effect. OpenCode has no per-turn model, so the
+connector honors `model` by switching the session's model, and that choice
+persists for later prompts that omit it, as it does in OpenCode's own TUI. A
+client that offers selection should therefore name its model on every prompt
+once one is picked. Recheck capabilities after reconnect. As with mode,
 do not retry a prompt automatically, including by dropping `model`/`effort` after
 a failure or uncertain outcome.
 

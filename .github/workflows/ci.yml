@@ -29,33 +29,24 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Pinned to the version the integration tests assert against
-      # (test/support/opencode-project-fixture.mjs OPENCODE_VERSION).
-      - name: Install OpenCode CLI
-        run: |
-          curl -fsSL https://opencode.ai/install | bash -s -- --version 1.18.31
-          echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
-
-      # OpenCode 2 is published to npm, not to the GitHub releases the 1.x
-      # installer reads, so it is installed separately and never goes on PATH:
-      # a bare `opencode` must stay 1.x for the 1.x integration tests.
+      # OpenCode is published to npm, and installed here rather than put on PATH.
       #
       # @opencode/cli's postinstall resolves the platform binary at install time;
       # the linux-x64 package it would land on is depended on directly instead, so
       # the step needs no install scripts and pins exactly what it runs. The plugin
-      # deliberately depends on no OpenCode 2 package (ADR 0013), so the v2 client
-      # the test drives the real server through is installed here too rather than
-      # as a workspace devDependency.
+      # deliberately depends on no OpenCode package (ADR 0013), so the client the
+      # test drives the real server through is installed here too rather than as a
+      # workspace devDependency.
       #
-      # Pinned to the version ADR 0013 verified the v2 adapter against.
-      - name: Install OpenCode 2 and its client for the v2 integration test
+      # Pinned to the version ADR 0013 verified the adapter against.
+      - name: Install OpenCode and its client for the integration test
         run: |
-          mkdir -p "$HOME/opencode2"
-          cd "$HOME/opencode2"
+          mkdir -p "$HOME/opencode"
+          cd "$HOME/opencode"
           npm install --ignore-scripts --no-package-lock --no-audit --no-fund \
             @opencode/cli-linux-x64@2.0.12 @opencode/client@2.0.12
-          echo "OPENCODE_V2_TEST_BINARY=$HOME/opencode2/node_modules/@opencode/cli-linux-x64/bin/opencode" >> "$GITHUB_ENV"
-          echo "OPENCODE_V2_CLIENT=$HOME/opencode2/node_modules/@opencode/client/dist/promise/index.js" >> "$GITHUB_ENV"
+          echo "OPENCODE_TEST_BINARY=$HOME/opencode/node_modules/@opencode/cli-linux-x64/bin/opencode" >> "$GITHUB_ENV"
+          echo "OPENCODE_CLIENT=$HOME/opencode/node_modules/@opencode/client/dist/promise/index.js" >> "$GITHUB_ENV"
 
       - name: Lint
         run: pnpm run lint
@@ -63,7 +54,7 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
-      # OPENCODE_V2_TEST_BINARY and OPENCODE_V2_CLIENT are set above, so
-      # test/integration/v2-connector.test.mjs runs rather than skipping.
+      # OPENCODE_TEST_BINARY and OPENCODE_CLIENT are set above, so
+      # test/integration/opencode-connector.test.mjs runs rather than skipping.
       - name: Test
         run: pnpm run test
