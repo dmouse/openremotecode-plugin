@@ -1,5 +1,6 @@
 import { startConnector, type ConnectorNotification } from "../connector.js";
 import { WorkspaceRegistry } from "../chat/workspace.js";
+import { announceDirectory, liveDirectories, resolvePresencePath } from "../directory-presence.js";
 import { OpenCodeChatAdapter } from "./chat-adapter.js";
 import type { OpenCodeClient } from "./client.js";
 import { OpenCodeMcpReader } from "./mcp.js";
@@ -81,6 +82,10 @@ export async function setupConnector(context: TuiContext): Promise<() => Promise
   } catch {
     // Without the chip the connector and /remote still work; there is nothing to tell the user.
   }
+  // Announced whether or not this instance ends up holding the connection: the holder serves
+  // every announced directory, so an instance on standby is still reachable from the app.
+  const presencePath = resolvePresencePath();
+  const presence = announceDirectory({ presencePath, directory });
   const connector = await startConnector({
     options,
     log: (level, message) => {
@@ -99,7 +104,7 @@ export async function setupConnector(context: TuiContext): Promise<() => Promise
     // and fails closed rather than completing without consent.
     confirm: (question) => context.ui.dialog.confirm(question),
     adapters: () => {
-      const registry = new WorkspaceRegistry(directory, options.projectDirectories);
+      const registry = new WorkspaceRegistry(directory, options.projectDirectories, () => liveDirectories(presencePath));
       const chats = new OpenCodeChatAdapter(context.client, directory, options.projectDirectories, registry);
       return { sessions: new OpenCodeSessionReader(context.client, directory), chats,
         mcp: new OpenCodeMcpReader(context.client, registry), stream: chats };
@@ -109,6 +114,7 @@ export async function setupConnector(context: TuiContext): Promise<() => Promise
     dialogs.abort();
     releaseCommand();
     releaseChip();
+    await presence.stop();
     await connector.dispose?.();
   };
 }

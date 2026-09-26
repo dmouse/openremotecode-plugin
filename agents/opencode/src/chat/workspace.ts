@@ -28,11 +28,17 @@ export async function workspaceId(canonical: string): Promise<string> {
 // depends on before it is allowed to touch a workspace.
 export class WorkspaceRegistry {
   readonly #directories: string[];
-  #workspaces: Promise<Workspace[]> | undefined;
+  readonly #discover: (() => Promise<string[]>) | undefined;
+  // Keyed by canonical path so dev/ino stay pinned from first sight: a directory replaced by a
+  // different one is refused by get() rather than silently adopted.
+  readonly #known = new Map<string, Promise<Workspace>>();
 
-  constructor(directory: string, additionalDirectories: unknown = []) {
+  /// `discover` yields directories other live instances have announced. They are re-read on every
+  /// listing so a folder appears when OpenCode starts there and disappears when it exits.
+  constructor(directory: string, additionalDirectories: unknown = [], discover?: () => Promise<string[]>) {
     const additional = z.array(z.string().min(1).max(4096)).max(99).parse(additionalDirectories);
     this.#directories = [...new Set([directory, ...additional])];
+    this.#discover = discover;
     // eslint-disable-next-line no-control-regex -- deliberately rejects C0 control characters in paths
     if (this.#directories.some((d) => !path.isAbsolute(d) || /[\x00-\x1f]/u.test(d))) {
       throw new ChatAccessError("access_denied");
@@ -40,13 +46,33 @@ export class WorkspaceRegistry {
   }
 
   async list(): Promise<Workspace[]> {
-    return this.#workspaces ??= Promise.all(this.#directories.map(async (directory) => {
-      const canonical = await realpath(directory);
-      const info = await stat(canonical);
-      if (!info.isDirectory()) throw new ChatAccessError("access_denied");
-      return { id: await workspaceId(canonical), name: path.basename(canonical) || canonical,
-        path: canonical, dev: info.dev, ino: info.ino };
-    }));
+    const configured = await Promise.all(this.#directories.map((directory) => this.#resolve(directory)));
+    // An announced directory that has since vanished is skipped, not fatal: it belongs to
+    // another instance, and it must not take down the project list of this one.
+    const announced = (await this.#discover?.().catch(() => [] as string[]) ?? [])
+      .filter((directory) => !this.#directories.includes(directory));
+    const discovered = (await Promise.all(announced.map((directory) => this.#resolve(directory).catch(() => undefined))))
+      .filter((entry): entry is Workspace => entry !== undefined);
+    const seen = new Set<string>();
+    const all = [...configured, ...discovered].filter((entry) => !seen.has(entry.path) && seen.add(entry.path));
+    for (const key of this.#known.keys()) if (!seen.has(key)) this.#known.delete(key);
+    return all;
+  }
+
+  async #resolve(directory: string): Promise<Workspace> {
+    const canonical = await realpath(directory);
+    let entry = this.#known.get(canonical);
+    if (!entry) {
+      entry = (async () => {
+        const info = await stat(canonical);
+        if (!info.isDirectory()) throw new ChatAccessError("access_denied");
+        return { id: await workspaceId(canonical), name: path.basename(canonical) || canonical,
+          path: canonical, dev: info.dev, ino: info.ino };
+      })();
+      this.#known.set(canonical, entry);
+      entry.catch(() => this.#known.delete(canonical));
+    }
+    return entry;
   }
 
   // Lists every configured project and re-verifies each one still resolves to the same

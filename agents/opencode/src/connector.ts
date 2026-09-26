@@ -259,8 +259,8 @@ export async function startConnector(host: ConnectorHost): Promise<ConnectorHand
       await stop?.();
     },
     onStandby: () => {
-      deferLog(log, "info", "Another OpenCode instance holds the Open Remote Code connection; this directory is reachable " +
-        "from the app only if the holder lists it in the projectDirectories plugin option");
+      deferLog(log, "info", "Another OpenCode instance holds the Open Remote Code connection; this directory is served " +
+        "through it while OpenCode keeps running here");
     },
   });
 

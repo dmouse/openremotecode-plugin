@@ -65,7 +65,14 @@ The plugin includes a versioned HPKE authenticated envelope using P-256, HKDF-SH
 
 ### Several projects on one computer
 
-OpenCode loads the plugin once per project directory, and every instance shares the same connector identity. Only one instance holds the connection to the service at a time; the others wait and take over if it exits. The connected instance serves its own directory plus the exact absolute directories in `projectDirectories`, so list every project you want to reach from the app, in the plugin entry of each project's `opencode.json`:
+OpenCode loads the plugin once per project directory, and every instance shares the same connector identity. Only one instance holds the connection to the service at a time; the others wait and take over if it exits.
+
+Directories are set up automatically. Each running instance announces its own directory in the private Open Remote Code data directory, and the connected instance serves every announced directory, so the app sees a project as soon as OpenCode is launched in it and stops seeing it when OpenCode exits there (a crashed instance is dropped within seconds). Where you install the plugin decides the scope:
+
+- **Installed globally**, every folder you launch OpenCode in becomes available in the app.
+- **Installed in one project** (`<project>/.opencode/plugins/`), only that project is available.
+
+`projectDirectories` remains as an optional way to add exact absolute directories that no running instance announces:
 
 ```json
 {
@@ -78,7 +85,7 @@ OpenCode loads the plugin once per project directory, and every instance shares 
 }
 ```
 
-The app's **Open project by path** only opens a directory that is already authorized this way. A project that is not listed is reachable only while its own instance holds the connection.
+The app's **Open project by path** only opens a directory that is currently available this way.
 
 ## Revoking remote access
 

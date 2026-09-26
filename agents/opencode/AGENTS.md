@@ -106,6 +106,8 @@ The same user may run multiple OpenCode processes and projects. Do not expose ab
 
 A connector has a persistent identity. Each active plugin process advertises an opaque endpoint identifier. Human-readable project and workspace information belongs inside encrypted responses. Concurrent endpoints must not overwrite one another's connection or synchronization state.
 
+Every instance announces its directory in the private data directory (`src/directory-presence.ts`) for as long as it runs, and the connection holder serves the union of live announcements plus the optional `projectDirectories`. Access therefore follows where the plugin is loaded: a global install reaches every folder OpenCode runs in, a per-project install only that project. Announcements expire when their heartbeat stops, are validated as hostile input, and never leave the machine as routing metadata.
+
 ## Reliability and Resource Limits
 
 - Use bounded command and event queues.
