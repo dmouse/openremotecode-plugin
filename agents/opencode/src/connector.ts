@@ -24,7 +24,7 @@ import { RemoteAPIClient } from "./remote-api-client.js";
 import { configuredServiceOrigin, validateLocalRelayURL } from "./service-origin.js";
 import { monitorAuthorization } from "./auth/authorization-monitor.js";
 
-const PLUGIN_VERSION = "0.1.0";
+const PLUGIN_VERSION = "0.2.1";
 const RELAY_URL_ENVIRONMENT_VARIABLE = "OPENCODE_REMOTE_RELAY_URL";
 const TRUSTED_CLIENT_ENVIRONMENT_VARIABLE = "OPENCODE_REMOTE_TRUSTED_CLIENT_IDENTITY";
 
