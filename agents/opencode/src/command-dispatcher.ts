@@ -41,7 +41,7 @@ interface CommandDispatcherOptions {
 }
 
 const mutations = new Set<ChatOperation>(["chat.create", "chat.prompt", "chat.abort", "chat.delete", "chat.rename", "chat.fork",
-  "chat.question.reply"]);
+  "chat.permission.reply", "chat.question.reply"]);
 interface RelayBinding { controller: AbortController; send: (envelope: EncryptedRelayEnvelope) => boolean
   subscriptions?: ProjectMcpSubscriptions; chats?: ChatStreams }
 
@@ -81,8 +81,8 @@ export class CommandDispatcher {
    * Binds the dispatcher to a connection epoch, or to none once the peer goes
    * away. Sequence numbers restart per epoch, so the window and the outgoing
    * counter reset together; the mutation journal deliberately survives, so a
-   * client retrying across a reconnect still gets its first outcome instead of
-   * a second execution.
+   * client retrying across a reconnect does not cause a second execution.
+   * Responses from a previous epoch cannot be reused in the new one.
    */
   setEpoch(epoch: string | undefined): void {
     if (epoch === this.#epoch) return;
@@ -210,7 +210,23 @@ export class CommandDispatcher {
     if (!mutations.has(request.operation as ChatOperation)) return this.#execute(request, relay);
     const signature = createHash("sha256").update(JSON.stringify([request.operation, request.body])).digest("hex");
     const previous = this.#requests.get(request.requestId);
-    if (previous) return previous.signature === signature ? previous.response : undefined;
+    if (previous) {
+      if (previous.signature !== signature) return undefined;
+      // A connection can end while the original SDK call is still running. In
+      // that case response encryption may fail because no epoch remains, but
+      // the request must stay journaled: the SDK call may already have acted.
+      const response = await previous.response.catch(() => undefined);
+      // The journal survives a reconnect to prevent a second execution, but a
+      // ciphertext from the old epoch cannot be opened by the newly connected
+      // client. Report an uncertain result in this epoch instead of returning
+      // an unusable old frame or claiming the operation ran again.
+      if (response?.epoch === epoch) return response;
+      if (this.#epoch !== epoch || this.#relay !== relay) return undefined;
+      return this.#errorResponse(request, {
+        code: "uncertain_outcome",
+        message: "The earlier result could not be confirmed; refresh before retrying",
+      });
+    }
     if (this.#requests.size >= 128) return undefined;
     const response = this.#execute(request, relay);
     this.#requests.set(request.requestId, { signature, expires: now + 300000, response });

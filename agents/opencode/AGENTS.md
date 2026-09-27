@@ -123,8 +123,10 @@ Every instance announces its directory in the private data directory (`src/direc
   epoch from both peers' hello nonces; outgoing sequence numbers restart at zero with it
   and the inbound sequence window is recreated with it. The mutation journal is the
   deliberate exception: it is keyed by request identifier and must survive a reconnect, so
-  a client retrying after an uncertain outcome receives its first result rather than a
-  second execution. See [server ADR 0011](../../../server/docs/adr/0011-relay-connection-epochs.md).
+  a client retrying after an uncertain outcome never causes a second execution. A
+  result already encrypted for an earlier epoch cannot be replayed to a new one:
+  return an encrypted `uncertain_outcome` in the new epoch and require an
+  authoritative snapshot before further action. See [server ADR 0011](../../../server/docs/adr/0011-relay-connection-epochs.md).
 - Apply timeouts and cancellation to SDK operations where supported.
 - Keep networking and cryptography off latency-sensitive event-hook paths.
 - Surface connector status without repeatedly notifying or disrupting the developer.

@@ -19,13 +19,13 @@ async function fixture(execute) {
   let sequence = 0
   return {
     dispatcher,
-    async request(operation, body, requestId = crypto.randomUUID()) {
+    async request(operation, body, requestId = crypto.randomUUID(), epoch = TEST_EPOCH) {
       return encryptRelayPayload({ sender: client.identity, recipient: connector.identity.publicIdentity,
         payload: { protocolVersion: 2, kind: "request", requestId, sentAt: Date.now(), operation, body },
-        epoch: TEST_EPOCH, sequence: sequence++ })
+        epoch, sequence: sequence++ })
     },
-    async decode(envelope) { return decryptRelayEnvelope({ recipient: client.identity,
-      sender: connector.identity.publicIdentity, envelope, epoch: TEST_EPOCH }) },
+    async decode(envelope, epoch = TEST_EPOCH) { return decryptRelayEnvelope({ recipient: client.identity,
+      sender: connector.identity.publicIdentity, envelope, epoch }) },
   }
 }
 
@@ -75,6 +75,66 @@ test("encrypted delete is journaled and failures have a fixed uncertain outcome"
   const response = await failing.decode(await failing.dispatcher.handle(await failing.request("chat.delete", body)))
   assert.equal(response.body.code, "uncertain_outcome")
   assert.equal(JSON.stringify(response).includes("private path"), false)
+})
+
+test("permission decisions execute once and a reused request ID cannot change the decision", async () => {
+  let calls = 0
+  const f = await fixture(async (operation, body) => {
+    calls++
+    assert.equal(operation, "chat.permission.reply")
+    assert.equal(body.response, "always")
+    return { version: 1, accepted: true }
+  })
+  const id = crypto.randomUUID()
+  const body = { version: 1, projectId: crypto.randomUUID(), sessionId: "ses_fixture",
+    permissionId: "per_fixture", response: "always" }
+  const first = await f.dispatcher.handle(await f.request("chat.permission.reply", body, id))
+  const repeated = await f.dispatcher.handle(await f.request("chat.permission.reply", body, id))
+  assert.equal(calls, 1)
+  assert.deepEqual(repeated, first)
+  assert.deepEqual((await f.decode(first)).body, { version: 1, accepted: true })
+  assert.equal(await f.dispatcher.handle(await f.request("chat.permission.reply", { ...body, response: "reject" }, id)), undefined)
+  assert.equal(calls, 1)
+})
+
+test("a mutation retried after reconnect never reruns and reports an encrypted uncertain outcome", async () => {
+  let calls = 0
+  const f = await fixture(async () => { calls++; return { version: 1, accepted: true } })
+  const id = crypto.randomUUID()
+  const body = { version: 1, projectId: crypto.randomUUID(), sessionId: "ses_fixture",
+    permissionId: "per_fixture", response: "always" }
+  const oldResponse = await f.dispatcher.handle(await f.request("chat.permission.reply", body, id))
+  assert.deepEqual((await f.decode(oldResponse)).body, { version: 1, accepted: true })
+  const newEpoch = "n".repeat(43)
+  f.dispatcher.setEpoch(newEpoch)
+  const response = await f.dispatcher.handle(await f.request("chat.permission.reply", body, id, newEpoch))
+  assert.equal(calls, 1)
+  assert.equal(response.epoch, newEpoch)
+  assert.deepEqual((await f.decode(response, newEpoch)).body, {
+    code: "uncertain_outcome", message: "The earlier result could not be confirmed; refresh before retrying",
+  })
+})
+
+test("an in-flight mutation whose old epoch ends remains journaled for the next epoch", async () => {
+  let calls = 0, release
+  let started
+  const entered = new Promise((resolve) => { started = resolve })
+  const gate = new Promise((resolve) => { release = resolve })
+  const f = await fixture(async () => { calls++; started(); await gate; return { version: 1, accepted: true } })
+  const id = crypto.randomUUID()
+  const body = { version: 1, projectId: crypto.randomUUID(), sessionId: "ses_fixture",
+    permissionId: "per_fixture", response: "always" }
+  const first = f.dispatcher.handle(await f.request("chat.permission.reply", body, id))
+  const failedFirst = assert.rejects(first)
+  await entered
+  f.dispatcher.setEpoch(undefined)
+  release()
+  await failedFirst
+  const newEpoch = "n".repeat(43)
+  f.dispatcher.setEpoch(newEpoch)
+  const response = await f.dispatcher.handle(await f.request("chat.permission.reply", body, id, newEpoch))
+  assert.equal(calls, 1)
+  assert.equal((await f.decode(response, newEpoch)).body.code, "uncertain_outcome")
 })
 
 test("access denial and uncertain mutation failures expose only fixed encrypted errors", async () => {
