@@ -30,8 +30,10 @@ and `message.truncated`. Existing 100-part, ten-message page, 200-retained-messa
 mobile, encryption and relay byte limits still apply; oversized encrypted
 responses fail through the existing bounded-response path.
 
-The pinned OpenCode `bash` tool supplies `state.input.command`. Completed output
-comes from `state.output`; running output comes from `state.metadata.output`.
+OpenCode 2's `shell` tool (and older `bash` calls) supplies `state.input.command`.
+Completed output comes from the text entries of its `state.content` array after
+the OpenCode adapter normalizes it to `state.output`; running output comes from
+`state.metadata.output`.
 Failed tools use `metadata.output` when present, otherwise `state.error`.
 Pending tools have empty output. No description is required for native `!` shell
 invocations. The plugin never follows output-file paths or performs extra reads.

@@ -56,6 +56,21 @@ test("a running tool's own metadata.output and truncated flag survive instead of
   assert.equal(projected.parts[0].tool.shell.truncated, true)
 })
 
+test("V2 shell streaming output is visible only with the separate shell opt-in", () => {
+  const message = { id: "assistant", type: "assistant", time: { created: 1 }, content: [
+    { id: "shell1", type: "tool", name: "shell", time: { created: 1, ran: 2 },
+      state: { status: "running", input: { command: "printf 'hello'" }, metadata: { output: "partial", truncated: true } } },
+  ] }
+  const parts = convertMessage(message, "session").parts
+  const plain = chatMessageContent("assistant", parts, undefined, { includeTools: true })
+  assert.equal(plain.parts[0].tool.shell, undefined)
+  const projected = chatMessageContent("assistant", parts, undefined, { includeTools: true, includeShell: true })
+  assert.equal(projected.parts[0].tool.operation, "execute")
+  assert.deepEqual(projected.parts[0].tool.shell,
+    { command: "printf 'hello'", output: "partial", truncated: true })
+  assert.equal(projected.truncated, true)
+})
+
 test("an error tool state falls back to its own metadata.output, then to the error message", () => {
   const withOutput = { id: "assistant", type: "assistant", time: { created: 1, completed: 2 }, content: [
     { id: "bash1", type: "tool", name: "bash", time: { created: 1, completed: 2 },

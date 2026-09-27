@@ -1,0 +1,38 @@
+{
+  "nativeMessage": {
+    "id": "msg_v2_tools", "type": "assistant", "time": { "created": 1000, "completed": 2000 },
+    "content": [
+      { "id": "p_patch", "type": "tool", "name": "patch", "time": { "created": 1000, "completed": 1100 },
+        "state": { "status": "completed", "input": { "patchText": "*** Begin Patch\n*** Update File: /workspace/lib/example.dart\n@@\n-PRIVATE_PATCH_LINE\n+PRIVATE_PATCH_LINE\n*** End Patch" },
+          "content": [{ "type": "text", "text": "PRIVATE_PATCH_OUTPUT" }] } },
+      { "id": "p_shell", "type": "tool", "name": "shell", "time": { "created": 1100, "completed": 1200 },
+        "state": { "status": "completed", "input": { "command": "printf 'v2 shell\\n'" },
+          "content": [{ "type": "text", "text": "v2 shell\n" }], "metadata": { "secret": "PRIVATE_METADATA" } } },
+      { "id": "p_read", "type": "tool", "name": "read", "time": { "created": 1200, "completed": 1300 },
+        "state": { "status": "completed", "input": { "path": "/workspace/mobile/lib/main.dart" },
+          "content": [{ "type": "text", "text": "PRIVATE_FILE_CONTENT" }] } },
+      { "id": "p_fetch", "type": "tool", "name": "webfetch", "time": { "created": 1300, "completed": 1400 },
+        "state": { "status": "completed", "input": { "url": "https://user:secret@docs.example.test/private?token=PRIVATE_TOKEN#frag" },
+          "content": [{ "type": "text", "text": "PRIVATE_FETCH_CONTENT" }] } },
+      { "id": "p_execute", "type": "tool", "name": "execute", "time": { "created": 1400, "completed": 1500 },
+        "state": { "status": "completed", "input": { "code": "PRIVATE_CODE" },
+          "content": [{ "type": "text", "text": "PRIVATE_CODE_OUTPUT" }] } },
+      { "id": "p_search", "type": "tool", "name": "grep", "time": { "created": 1500, "completed": 1600 },
+        "state": { "status": "completed", "input": { "pattern": "needle", "path": "/workspace/mobile/lib" },
+          "content": [{ "type": "text", "text": "PRIVATE_SEARCH_RESULTS" }] } }
+    ]
+  },
+  "response": {
+    "id": "msg_v2_tools", "role": "assistant", "truncated": false,
+    "text": "[Tool: patch · completed]\n[Tool: shell · completed]\n[Tool: read · completed]\n[Tool: webfetch · completed]\n[Tool: execute · completed]\n[Tool: grep · completed]\n",
+    "parts": [
+      { "id": "PATCH_ID", "type": "tool", "text": "[Tool: patch · completed]\n", "tool": { "operation": "edit", "status": "completed", "description": "lib/example.dart", "durationMs": 100 } },
+      { "id": "SHELL_ID", "type": "tool", "text": "[Tool: shell · completed]\n", "tool": { "operation": "execute", "status": "completed", "durationMs": 100,
+        "shell": { "command": "printf 'v2 shell\\n'", "output": "v2 shell\n", "truncated": false } } },
+      { "id": "READ_ID", "type": "tool", "text": "[Tool: read · completed]\n", "tool": { "operation": "read", "status": "completed", "description": "mobile/lib/main.dart", "durationMs": 100 } },
+      { "id": "FETCH_ID", "type": "tool", "text": "[Tool: webfetch · completed]\n", "tool": { "operation": "fetch", "status": "completed", "description": "docs.example.test", "durationMs": 100 } },
+      { "id": "EXECUTE_ID", "type": "tool", "text": "[Tool: execute · completed]\n", "tool": { "operation": "tool", "status": "completed", "description": "Run code", "durationMs": 100 } },
+      { "id": "SEARCH_ID", "type": "tool", "text": "[Tool: grep · completed]\n", "tool": { "operation": "search", "status": "completed", "description": "\"needle\" in mobile/lib", "durationMs": 100 } }
+    ]
+  }
+}

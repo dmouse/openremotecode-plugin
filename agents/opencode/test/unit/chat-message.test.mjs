@@ -2,10 +2,42 @@ import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
 import { chatMessageContent } from "../../dist/chat-message.js"
+import { convertMessage } from "../../dist/message-history.js"
 
 const fixture = JSON.parse(await readFile(new URL("../../../../protocol/test/fixtures/chat-reasoning-v1.json", import.meta.url), "utf8"))
 const tools = JSON.parse(await readFile(new URL("../../../../protocol/test/fixtures/chat-tools-v1.json", import.meta.url), "utf8"))
 const shells = JSON.parse(await readFile(new URL("../../../../protocol/test/fixtures/chat-shell-v1.json", import.meta.url), "utf8"))
+const v2tools = JSON.parse(await readFile(new URL("../../../../protocol/test/fixtures/chat-v2-tools-v1.json", import.meta.url), "utf8"))
+
+test("V2 tool names and inputs project the shared mobile fixture without raw content", () => {
+  const parts = convertMessage(v2tools.nativeMessage, "ses_v2").parts
+  const projected = chatMessageContent("assistant", parts, undefined,
+    { includeTools: true, includeShell: true, directory: "/workspace" })
+  assert.deepEqual(projected, { text: v2tools.response.text, truncated: false,
+    parts: v2tools.response.parts.map((part, index) => ({ ...part, id: parts[index].id })) })
+  assert.equal(JSON.stringify(projected).includes("PRIVATE_"), false)
+  assert.equal(JSON.stringify(projected).includes("user:secret"), false)
+  const summaries = chatMessageContent("assistant", parts, undefined,
+    { includeTools: true, directory: "/workspace" })
+  assert.equal(summaries.parts[1].tool.shell, undefined)
+  assert.equal(JSON.stringify(summaries).includes("v2 shell\\n"), false)
+  assert.equal(JSON.stringify(summaries).includes("v2 shell\n"), false)
+  assert.equal(JSON.stringify(chatMessageContent("assistant", parts)).includes("mobile/lib/main.dart"), false)
+})
+
+test("V2 patch and URL descriptions fail closed on malformed input and external paths", () => {
+  const summarize = (name, input) => chatMessageContent("assistant", [{ id: "p", type: "tool", tool: name,
+    state: { status: "completed", input, output: "PRIVATE_OUTPUT" } }], undefined,
+  { includeTools: true, directory: "/workspace" }).parts[0].tool
+  assert.equal(summarize("patch", { patchText: "*** Begin Patch\n*** Add File: /outside/secret.dart\n+PRIVATE_HUNK" }).description, "secret.dart")
+  assert.equal(summarize("patch", { patchText: "PRIVATE_PATCH" }).description, "Patch")
+  assert.equal(summarize("read", { path: "/outside/private.dart" }).description, "private.dart")
+  assert.equal(summarize("webfetch", { url: "file:///home/private.txt" }).description, "Fetch web content")
+  assert.equal(summarize("webfetch", { url: "not-a-url" }).description, "Fetch web content")
+  assert.equal(summarize("webfetch", { url: "https://example.test/private?secret=value" }).description, "example.test")
+  assert.equal(summarize("execute", { code: "PRIVATE_CODE" }).description, "Run code")
+  assert.equal(JSON.stringify(summarize("execute", { code: "PRIVATE_CODE" })).includes("PRIVATE_"), false)
+})
 
 test("native shell pair matches shared fixture and details require both opt-ins", () => {
   const { id: _id, role, ...expected } = shells.response.messages[1]

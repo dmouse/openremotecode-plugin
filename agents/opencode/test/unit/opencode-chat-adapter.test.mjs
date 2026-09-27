@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
@@ -658,6 +658,22 @@ test("chat.snapshot projects a shell tool call, and a non-shell tool falls back 
   const withShell = await adapter.execute("chat.snapshot", { version: 1, projectId, sessionId: "ses_1", includeTools: true, includeShell: true })
   assert.deepEqual(withShell.messages[1].parts[1].tool.shell, { command: "ls -la", output: "a.dart\nb.dart", truncated: false })
   assert.equal(JSON.stringify(withShell).includes("filePath"), false, "raw tool input never crosses the wire, only the derived description")
+})
+
+test("chat.snapshot projects V2 shell, patch, read, fetch and execute inputs without tool bodies", async (t) => {
+  const { adapter, projectId, add, state, root } = await fixture(t)
+  add("ses_1")
+  const native = JSON.parse(await readFile(new URL("../../../../protocol/test/fixtures/chat-v2-tools-v1.json", import.meta.url), "utf8"))
+  native.nativeMessage.content[0].state.input.patchText = native.nativeMessage.content[0].state.input.patchText.replace("/workspace/", `${root}/`)
+  native.nativeMessage.content[2].state.input.path = path.join(root, "mobile/lib/main.dart")
+  native.nativeMessage.content[5].state.input.path = path.join(root, "mobile/lib")
+  state.messages.set("ses_1", [user(0), { ...native.nativeMessage, id: "msg_v2_tools", sessionID: "ses_1" }])
+  const snapshot = await adapter.execute("chat.snapshot", { version: 1, projectId, sessionId: "ses_1",
+    includeTools: true, includeShell: true })
+  assert.deepEqual(snapshot.messages[1].parts.map((part) => part.tool.description),
+    ["lib/example.dart", undefined, "mobile/lib/main.dart", "docs.example.test", "Run code", '"needle" in mobile/lib'])
+  assert.equal(snapshot.messages[1].parts[1].tool.shell.output, "v2 shell\n")
+  assert.equal(JSON.stringify(snapshot).includes("PRIVATE_"), false)
 })
 
 const multiselectField = (key, title, options, extra = {}) =>

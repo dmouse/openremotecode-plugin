@@ -20,8 +20,8 @@ export function activityFor(part: Part, messageFinished = false, sessionSettled 
       : !messageFinished && !sessionSettled && validStart && end === undefined ? "running" : "unknown" };
   }
   if (part.type !== "tool") return undefined;
-  const kinds: Record<string, Activity["kind"]> = { bash: "execute", read: "read", write: "write", edit: "edit",
-    apply_patch: "apply_patch", grep: "search", glob: "search", list: "list", webfetch: "fetch",
+  const kinds: Record<string, Activity["kind"]> = { bash: "execute", shell: "execute", read: "read", write: "write", edit: "edit",
+    patch: "apply_patch", apply_patch: "apply_patch", grep: "search", glob: "search", list: "list", webfetch: "fetch",
     todowrite: "update_tasks", task: "subtask" };
   const status = part.state.status;
   // `task` is excluded: a background subtask keeps running while the session

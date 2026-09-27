@@ -256,12 +256,24 @@ test("an OpenCode TUI connector serves encrypted chat operations through the rel
       time: { created: now, updated: now + 10 } },
     messages: [
       { id: "msg_u_tool", type: "user", time: { created: now }, text: "run it" },
-      { id: "msg_a_tool", type: "assistant", agent: "build", model, finish: "stop", time: { created: now + 1, completed: now + 5 },
+      { id: "msg_a_tool", type: "assistant", agent: "build", model, finish: "stop", time: { created: now + 1, completed: now + 10 },
         content: [
           { id: "read1", type: "tool", name: "read", time: { created: now + 1, completed: now + 2 },
             state: { status: "completed", input: { filePath: "/x/a.dart" }, content: [{ type: "text", text: "file body" }] } },
           { id: "bash1", type: "tool", name: "bash", time: { created: now + 2, ran: now + 2, completed: now + 4 },
             state: { status: "completed", input: { command: "ls -la", description: "list files" }, content: [{ type: "text", text: "a.dart" }] } },
+          { id: "shell2", type: "tool", name: "shell", time: { created: now + 4, ran: now + 4, completed: now + 5 },
+            state: { status: "completed", input: { command: "printf 'v2 shell\\n'" }, content: [{ type: "text", text: "v2 shell\n" }] } },
+          { id: "patch2", type: "tool", name: "patch", time: { created: now + 5, completed: now + 6 },
+            state: { status: "completed", input: { patchText: "*** Begin Patch\n*** Update File: /x/a.dart\n@@\n-private\n+private\n*** End Patch" },
+              content: [{ type: "text", text: "PRIVATE_PATCH_OUTPUT" }] } },
+          { id: "read2", type: "tool", name: "read", time: { created: now + 6, completed: now + 7 },
+            state: { status: "completed", input: { path: "/x/b.dart" }, content: [{ type: "text", text: "PRIVATE_FILE" }] } },
+          { id: "fetch2", type: "tool", name: "webfetch", time: { created: now + 7, completed: now + 8 },
+            state: { status: "completed", input: { url: "https://user:secret@docs.example.test/private?token=PRIVATE" },
+              content: [{ type: "text", text: "PRIVATE_FETCH" }] } },
+          { id: "execute2", type: "tool", name: "execute", time: { created: now + 8, completed: now + 9 },
+            state: { status: "completed", input: { code: "PRIVATE_CODE" }, content: [{ type: "text", text: "PRIVATE_CODE_OUTPUT" }] } },
           { type: "text", text: "done" },
         ] },
     ] })
@@ -273,6 +285,13 @@ test("an OpenCode TUI connector serves encrypted chat operations through the rel
   assert.equal("shell" in withTools.body.messages[1].parts[1].tool, false)
   const withShell = await call("chat.snapshot", { version: 1, projectId, sessionId: toolSeed.id, includeTools: true, includeShell: true })
   assert.deepEqual(withShell.body.messages[1].parts[1].tool.shell, { command: "ls -la", output: "a.dart", truncated: false })
+  assert.deepEqual(withShell.body.messages[1].parts[2].tool.shell,
+    { command: "printf 'v2 shell\\n'", output: "v2 shell\n", truncated: false })
+  assert.equal(withShell.body.messages[1].parts[3].tool.description, "a.dart")
+  assert.equal(withShell.body.messages[1].parts[4].tool.description, "b.dart")
+  assert.equal(withShell.body.messages[1].parts[5].tool.description, "docs.example.test")
+  assert.equal(withShell.body.messages[1].parts[6].tool.description, "Run code")
+  assert.equal(JSON.stringify(withShell.body.messages[1]).includes("PRIVATE_"), false)
   assert.equal(withShell.body.messages[1].parts.at(-1).text, "done\n")
 
   // Streaming: subscribe, observe the initial update, rename the chat live, and see the update

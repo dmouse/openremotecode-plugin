@@ -80,7 +80,28 @@ function displayPath(value: unknown, directory?: string) {
 // type names collapse to this fixed presentation set; anything unrecognized
 // falls back to "tool", never a native name copied through verbatim.
 const toolOperations: Record<string, ChatTool["operation"]> = { read: "read", edit: "edit", write: "write",
-  grep: "search", glob: "search", list: "list", bash: "execute", webfetch: "fetch", question: "question" };
+  patch: "edit", grep: "search", glob: "search", list: "list", bash: "execute", shell: "execute",
+  webfetch: "fetch", question: "question" };
+
+// Patch input is a diff, not a file read. Extract only a declared filename from
+// its header; never copy hunk lines or other patch text into a presentation field.
+function patchPath(value: unknown, directory?: string) {
+  if (typeof value !== "string" || !value.startsWith("*** Begin Patch\n")) return "";
+  const header = /^\*\*\* (?:Add|Update|Delete) File: ([^\r\n]+)/mu.exec(value.slice(0, 8192));
+  return header ? displayPath(header[1], directory) : "";
+}
+
+function fetchHost(value: unknown) {
+  if (typeof value !== "string" || value.length > 4096) return "";
+  try {
+    const url = new URL(value);
+    // A host is a bounded destination hint, not a URL (which could carry
+    // credentials, private paths, query parameters or fragments).
+    return url.protocol === "https:" || url.protocol === "http:" ? displayText(url.hostname, 160) : "";
+  } catch {
+    return "";
+  }
+}
 
 // A pending permission request, as opencode/snapshot.ts normalizes it: the
 // permission kind as a bare string and its patterns as an array.
@@ -109,13 +130,16 @@ function toolSummary(part: ToolPart, directory?: string, answeredQuestions: read
   let description = "";
   // Never forward arbitrary tool input, command strings, URLs, outputs or errors.
   // Native tool state can omit `input` despite its non-optional type.
-  if (["read", "edit", "write"].includes(operation)) {
-    description = displayPath(part.state.input?.filePath, directory);
+  if (part.tool === "patch") {
+    description = patchPath(part.state.input?.patchText, directory) || "Patch";
+  } else if (["read", "edit", "write"].includes(operation)) {
+    description = displayPath(part.state.input?.filePath ?? part.state.input?.path, directory);
   } else if (operation === "search") {
     const pattern = displayText(part.state.input?.pattern).slice(0, 160);
     const location = displayPath(part.state.input?.path, directory).slice(0, 80);
     description = [pattern ? `"${pattern}"` : "", location ? `in ${location}` : ""].filter(Boolean).join(" ");
-  } else if (part.tool === "bash") description = displayText(part.state.input?.description);
+  } else if (part.tool === "bash" || part.tool === "shell") description = displayText(part.state.input?.description);
+  else if (operation === "fetch") description = fetchHost(part.state.input?.url) || "Fetch web content";
   else if (operation === "question") {
     // The tool's own declared input schema, already trusted and sanitized the same way
     // the live pending banner is (see ADR 0011) -- never the tool's native output/metadata.
@@ -150,7 +174,7 @@ function toolSummary(part: ToolPart, directory?: string, answeredQuestions: read
       "mobile-mcp_mobile_type_keys": "Enter text",
       "context7_query-docs": "Look up documentation",
       "context7_resolve-library-id": "Find library documentation",
-      apply_patch: "Apply patch", todowrite: "Update task list", skill: "Load skill", task: "Run subtask",
+      apply_patch: "Apply patch", execute: "Run code", todowrite: "Update task list", skill: "Load skill", task: "Run subtask",
     };
     const name = displayText(part.tool).replace(/[_-]+/gu, " ").trim();
     description = displayText(Object.hasOwn(actions, part.tool) ? actions[part.tool]!
@@ -312,7 +336,7 @@ export function chatMessageContent(role: string, nativeParts: Part[], subtasks?:
       parts.push({ id: part.id, type: "subtask", text, task: subtasks.get(part.id) ?? subtaskSummary(part) });
     } else if (options.includeTools && role === "assistant" && part.type === "tool") {
       const tool = toolSummary(part, options.directory, options.answeredQuestions);
-      if (options.includeShell && part.tool === "bash") {
+      if (options.includeShell && (part.tool === "bash" || part.tool === "shell")) {
         let shortened = part.state.status !== "pending" && part.state.metadata?.truncated === true;
         const bounded = (value: unknown, limit: number) => {
           const source = typeof value === "string" ? value : "";

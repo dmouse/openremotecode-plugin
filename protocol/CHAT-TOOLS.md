@@ -21,7 +21,12 @@ has exactly these bounded, validated presentation fields:
 
 The plugin normalizes known native operation names. Read/edit/write may expose
 a short project-relative filename; external paths display only their basename.
-Bash summaries expose their bounded description. Commands and output require the
+The observed V2 `read` calls use `path` (other calls may use `filePath`). A `patch`
+call may expose only the first declared file path in a well-formed patch header,
+never the patch body. `webfetch` may expose only the destination hostname, not
+the URL's credentials, path, query, fragment or response. Code-mode `execute`
+uses the fixed description "Run code"; its code and result are not projected.
+Shell/bash summaries expose their bounded description. Commands and output require the
 separate `chat.shell` negotiation described in [CHAT-SHELL.md](CHAT-SHELL.md). Grep/glob expose the
 search pattern (up to 160 UTF-16 units) and optional display location (up to 80),
 within the existing 256-unit description field. They do not expose matched lines,
@@ -32,8 +37,9 @@ arguments. Unknown tools retain the generic operation and a bounded, humanized
 native tool name (already present in the legacy fallback), not native titles or
 metadata. Control
 characters and bidi overrides are removed from descriptions. Outside the negotiated shell exception, no native output,
-error body, URL, arbitrary metadata, or input object is forwarded. Only the
-explicitly allowlisted search pattern is included, not arbitrary tool arguments.
+error body, full URL, arbitrary metadata, or input object is forwarded. Only the
+explicitly allowlisted search pattern, file path, and fetch hostname are included,
+not arbitrary tool arguments.
 The existing 100-part and 48,000-text-unit limits, pagination, IDs, and relay
 payload bounds remain in effect. Tools add no SDK reads or polling.
 
@@ -58,7 +64,7 @@ described above unchanged.
 
 ## Threat Analysis
 
-- Filenames, search patterns and approved short descriptions expand the display-data allowlist;
+- Filenames, fetch hostnames, search patterns and approved short descriptions expand the display-data allowlist;
   they may still be sensitive. They travel only inside authenticated encrypted
   snapshots and are not logged, persisted remotely, or added to outer metadata.
 - Presentation does not authorize tool execution, file opening, shell access,
