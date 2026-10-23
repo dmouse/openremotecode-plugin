@@ -107,7 +107,7 @@ test("/remote revokes via HTTP and stops the running plugin relay without a rest
   await closed
   assert.equal(revoked, true)
   assert.equal(await store.load(), undefined)
-  assert.equal(shown.at(-1).options[0].title, "Remote access revoked")
+  assert.equal(shown.at(-1).options.find((option) => option.value === "status").title, "Remote access revoked")
   await delay(600)
   assert.equal(tickets, 1)
   assert.equal(JSON.stringify(toasts).includes(credential), false)

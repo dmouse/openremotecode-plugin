@@ -8,6 +8,7 @@ import { FileConnectorAuthorizationStore } from "../../dist/auth/authorization-s
 import { FileRevocationQueueStore, resolveRevocationQueuePath } from "../../dist/auth/revocation-queue.js"
 import { FileConnectorIdentityStore } from "../../dist/crypto/identity-store.js"
 import { openRemoteDialog, remoteAccessStores } from "../../dist/opencode/remote-dialog.js"
+import { FileFolderApprovalStore } from "../../dist/folder-approvals.js"
 
 const CREDENTIAL = `orc_${"A".repeat(43)}`
 
@@ -144,4 +145,58 @@ test("an expired credential is not presented as an active token", async (t) => {
   const { ui, shown } = fakeUI(["close"])
   await openRemoteDialog(ui, stores, new AbortController().signal)
   assert.equal(shown[0].options[0].value, "status")
+})
+
+test("/remote offers explicit enable and disable with the full current folder and saved status", async (t) => {
+  const { directory, stores } = await fixture(t, true)
+  const store = new FileFolderApprovalStore(path.join(directory, "approved-folders"))
+  const { ui, shown } = fakeUI(["folder", true, "folder", true, "close"])
+  await openRemoteDialog(ui, stores, new AbortController().signal, { directory, store })
+  const selections = shown.filter((e) => e.kind === "select")
+  assert.equal(selections[0].options[0].title, "Enable remote access for this folder")
+  assert.equal(selections[0].options[0].description, directory)
+  assert.equal(selections[1].options[0].title, "Disable remote access for this folder")
+  assert.equal(selections[1].options[0].footer, "Enabled")
+  assert.equal(selections[2].options[0].footer, "Not enabled")
+  const confirmations = shown.filter((e) => e.kind === "confirm")
+  assert.ok(confirmations.every((e) => e.message.includes(directory)))
+  assert.match(confirmations[0].message, /saved until/)
+  assert.match(confirmations[1].message, /not deleted/)
+  assert.deepEqual(await store.list(), [])
+})
+
+test("declining or dismissing a folder confirmation never enables access, even before pairing", async (t) => {
+  const { directory, stores } = await fixture(t)
+  const store = new FileFolderApprovalStore(path.join(directory, "approved-folders"))
+  for (const consent of [false, undefined]) {
+    const { ui } = fakeUI(["folder", consent, "close"])
+    await openRemoteDialog(ui, stores, new AbortController().signal, { directory, store })
+    assert.deepEqual(await store.list(), [])
+  }
+})
+
+test("aborting a pending folder confirmation does not save approval", async (t) => {
+  const { directory, stores } = await fixture(t)
+  const store = new FileFolderApprovalStore(path.join(directory, "approved-folders"))
+  const controller = new AbortController()
+  const { ui } = fakeUI(["folder", () => { controller.abort(); return true }])
+  await openRemoteDialog(ui, stores, controller.signal, { directory, store })
+  assert.deepEqual(await store.list(), [])
+})
+
+test("unavailable folders and write failures never report an approval as enabled", async (t) => {
+  const { directory, stores } = await fixture(t)
+  const folder = { version: 1, path: directory, dev: 1, ino: 1, enabled: false }
+  const { ui, shown } = fakeUI(["folder", true, "close"])
+  await openRemoteDialog(ui, stores, new AbortController().signal, { directory, store: {
+    inspect: async () => folder, setEnabled: async () => { throw new Error("PRIVATE") },
+  } })
+  assert.equal(shown.find((e) => e.kind === "alert").title, "Folder access not changed")
+  assert.ok(!JSON.stringify(shown).includes("PRIVATE"))
+  const unavailable = fakeUI(["folder", "close"])
+  await openRemoteDialog(unavailable.ui, stores, new AbortController().signal, { directory, store: {
+    inspect: async () => { throw new Error("PRIVATE") }, setEnabled: async () => assert.fail("must not save"),
+  } })
+  assert.equal(unavailable.shown[0].options[0].title, "Folder access unavailable")
+  assert.ok(!unavailable.shown.some((e) => e.kind === "confirm"))
 })

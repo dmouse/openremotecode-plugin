@@ -17,9 +17,10 @@ import { RemoteAPIClient } from "../remote-api-client.js";
 import { validateServiceOrigin } from "../service-origin.js";
 import { tokenAge } from "../token-age.js";
 import type { DialogUI } from "./setup.js";
+import type { FolderApprovalStore, FolderStatus } from "../folder-approvals.js";
 
 type RemoteAction = "details" | "regenerate" | "refresh" | "close" | "status" | "service" | "connector"
-  | "expires" | "linked" | "back" | "revoke"
+  | "expires" | "linked" | "back" | "revoke" | "folder"
 
 // One bounded lookup for a legacy authorization's linking date. Dialogs resolve once and cannot
 // be updated in place, so the lookup happens before the details open and simply degrades to "Date unavailable".
@@ -38,12 +39,43 @@ export function remoteAccessStores(): RemoteAccessStores {
  * kill switch -- the one control that must not depend on the relay, the service, or the phone.
  * The decisions it makes are the ones in remote-access.ts; only the presentation lives here.
  */
-export async function openRemoteDialog(ui: DialogUI, stores: RemoteAccessStores, signal: AbortSignal): Promise<void> {
+export async function openRemoteDialog(ui: DialogUI, stores: RemoteAccessStores, signal: AbortSignal,
+    folderAccess?: { directory: string; store: FolderApprovalStore }): Promise<void> {
+  const aborted = (): boolean => signal.aborted;
   let status = await currentStatus(stores);
   for (;;) {
-    if (signal.aborted) return;
-    const action = await ui.dialog.select<RemoteAction>({ title: "Open Remote Code", options: optionsFor(status) });
+    if (aborted()) return;
+    let folder: FolderStatus | undefined;
+    if (folderAccess) {
+      try { folder = await folderAccess.store.inspect(folderAccess.directory); } catch { /* No approval on failure. */ }
+    }
+    const options = optionsFor(status);
+    if (folderAccess) {
+      options.unshift({
+        title: folder ? `${folder.enabled ? "Disable" : "Enable"} remote access for this folder` : "Folder access unavailable",
+        value: "folder", description: folder?.path ?? "The current folder could not be verified.",
+        footer: folder ? (folder.enabled ? "Enabled" : "Not enabled") : "Unavailable",
+      });
+    }
+    const action = await ui.dialog.select<RemoteAction>({ title: "Open Remote Code", options });
     if (action === undefined || action === "close") return;
+    if (aborted()) return;
+    if (action === "folder" && folderAccess && folder) {
+      const confirmed = await ui.dialog.confirm({
+        title: `${folder.enabled ? "Disable" : "Enable"} remote access for this folder?`,
+        message: folder.enabled
+          ? `Stop remote access to chats in this folder, including live subscriptions:\n\n${folder.path}\n\nLocal chats are not deleted.`
+          : `Allow the paired phone to read chats and send prompts in this folder:\n\n${folder.path}\n\nOther folders are not enabled. This approval is saved until you disable it.`,
+      });
+      if (confirmed !== true || aborted()) continue;
+      try {
+        await folderAccess.store.setEnabled(folder, !folder.enabled);
+      } catch {
+        await ui.dialog.alert({ title: "Folder access not changed",
+          message: "The folder approval could not be saved. Review the current folder and retry." });
+      }
+      continue;
+    }
     if (action === "refresh" || action === "status") {
       status = await currentStatus(stores);
       continue;

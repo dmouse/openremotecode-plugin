@@ -1,7 +1,8 @@
 import { realpath } from "node:fs/promises";
 import { startConnector, type ConnectorNotification } from "../connector.js";
 import { WorkspaceRegistry } from "../chat/workspace.js";
-import { announceDirectory, liveDirectories, liveSessionIds, resolvePresencePath } from "../directory-presence.js";
+import { announceDirectory, liveSessionIds, resolvePresencePath } from "../directory-presence.js";
+import { FileFolderApprovalStore, resolveFolderApprovalsPath } from "../folder-approvals.js";
 import { OpenCodeChatAdapter } from "./chat-adapter.js";
 import type { OpenCodeClient } from "./client.js";
 import { OpenCodeMcpReader } from "./mcp.js";
@@ -91,8 +92,8 @@ export async function setupConnector(context: TuiContext): Promise<() => Promise
   } catch {
     // Without the chip the connector and /remote still work; there is nothing to tell the user.
   }
-  // Announced whether or not this instance ends up holding the connection: the holder serves
-  // every announced directory, so an instance on standby is still reachable from the app.
+  // Local tab announcements help recover moved sessions in already approved
+  // folders. They are not a source of directory authorization.
   const canonical = await realpath(directory);
   const localSessionIds = (): string[] => {
     const route = context.ui.router?.current();
@@ -101,8 +102,9 @@ export async function setupConnector(context: TuiContext): Promise<() => Promise
     return [...new Set(ids.slice(0, 64).map((id) => context.data.session?.root(id) ?? id))];
   };
   const presencePath = resolvePresencePath();
-  const registry = new WorkspaceRegistry(directory, options.projectDirectories, () => liveDirectories(presencePath));
-  const chats = new OpenCodeChatAdapter(context.client, directory, options.projectDirectories, registry, async (workspace) => {
+  const approvals = new FileFolderApprovalStore(resolveFolderApprovalsPath());
+  const registry = new WorkspaceRegistry(undefined, [], () => approvals.list());
+  const chats = new OpenCodeChatAdapter(context.client, directory, [], registry, async (workspace) => {
     return [...new Set([...(workspace.path === canonical ? localSessionIds() : []),
       ...await liveSessionIds(presencePath, workspace.path)])];
   });
@@ -126,7 +128,7 @@ export async function setupConnector(context: TuiContext): Promise<() => Promise
     // and fails closed rather than completing without consent.
     confirm: (question) => context.ui.dialog.confirm(question),
     adapters: () => {
-      return { sessions: new OpenCodeSessionReader(context.client, directory), chats,
+      return { sessions: new OpenCodeSessionReader(context.client, directory, registry), chats,
         mcp: new OpenCodeMcpReader(context.client, registry), stream: chats };
     },
   });
@@ -168,7 +170,12 @@ function registerRemoteCommand(context: TuiContext, signal: AbortSignal): () => 
         if (open) return;
         open = true;
         try {
-          await openRemoteDialog(context.ui, stores, signal);
+          // Capture the selected session's current location when the command is
+          // invoked, not the TUI's launch directory or a path supplied by a phone.
+          await openRemoteDialog(context.ui, stores, signal, {
+            directory: context.location?.directory ?? context.data.location.default().directory,
+            store: new FileFolderApprovalStore(resolveFolderApprovalsPath()),
+          });
         } catch (error) {
           context.ui.toast.show({ title: "Open Remote Code", variant: "error",
             message: `Remote access dialog failed: ${error instanceof Error ? error.message : String(error)}`, duration: 10_000 });

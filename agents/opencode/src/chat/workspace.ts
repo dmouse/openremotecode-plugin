@@ -4,6 +4,7 @@ import { z } from "zod";
 import { ChatAccessError } from "./access-error.js";
 
 export interface Workspace { id: string; name: string; path: string; dev: number; ino: number }
+export type WorkspaceDirectory = string | Pick<Workspace, "path" | "dev" | "ino">;
 
 /// Project identifiers must survive an OpenCode restart. A random id per plugin load
 /// silently invalidated every chat the phone already had open: each request resolved its
@@ -28,16 +29,17 @@ export async function workspaceId(canonical: string): Promise<string> {
 // depends on before it is allowed to touch a workspace.
 export class WorkspaceRegistry {
   readonly #directories: string[];
-  readonly #discover: (() => Promise<string[]>) | undefined;
+  readonly #discover: (() => Promise<WorkspaceDirectory[]>) | undefined;
   // Keyed by canonical path so dev/ino stay pinned from first sight: a directory replaced by a
   // different one is refused by get() rather than silently adopted.
   readonly #known = new Map<string, Promise<Workspace>>();
 
-  /// `discover` yields directories other live instances have announced. They are re-read on every
-  /// listing so a folder appears when OpenCode starts there and disappears when it exits.
-  constructor(directory: string, additionalDirectories: unknown = [], discover?: () => Promise<string[]>) {
+  /// `discover` is the host's authoritative dynamic directory policy, re-read on
+  /// every listing. Production supplies only persistent local approvals; passing
+  /// no default directory permits an empty-by-default registry.
+  constructor(directory: string | undefined, additionalDirectories: unknown = [], discover?: () => Promise<WorkspaceDirectory[]>) {
     const additional = z.array(z.string().min(1).max(4096)).max(99).parse(additionalDirectories);
-    this.#directories = [...new Set([directory, ...additional])];
+    this.#directories = [...new Set([...(directory ? [directory] : []), ...additional])];
     this.#discover = discover;
     // eslint-disable-next-line no-control-regex -- deliberately rejects C0 control characters in paths
     if (this.#directories.some((d) => !path.isAbsolute(d) || /[\x00-\x1f]/u.test(d))) {
@@ -47,10 +49,9 @@ export class WorkspaceRegistry {
 
   async list(): Promise<Workspace[]> {
     const configured = await Promise.all(this.#directories.map((directory) => this.#resolve(directory)));
-    // An announced directory that has since vanished is skipped, not fatal: it belongs to
-    // another instance, and it must not take down the project list of this one.
+    // A discovered directory that has since vanished is skipped, not fatal.
     const announced = (await this.#discover?.().catch(() => [] as string[]) ?? [])
-      .filter((directory) => !this.#directories.includes(directory));
+      .filter((directory) => !this.#directories.includes(typeof directory === "string" ? directory : directory.path));
     const discovered = (await Promise.all(announced.map((directory) => this.#resolve(directory).catch(() => undefined))))
       .filter((entry): entry is Workspace => entry !== undefined);
     const seen = new Set<string>();
@@ -59,8 +60,21 @@ export class WorkspaceRegistry {
     return all;
   }
 
-  async #resolve(directory: string): Promise<Workspace> {
-    const canonical = await realpath(directory);
+  async #resolve(directory: WorkspaceDirectory): Promise<Workspace> {
+    const canonical = await realpath(typeof directory === "string" ? directory : directory.path);
+    if (typeof directory !== "string") {
+      const info = await stat(canonical);
+      if (canonical !== directory.path || !info.isDirectory() || info.dev !== directory.dev || info.ino !== directory.ino) {
+        throw new ChatAccessError("access_denied");
+      }
+      // Carry durable approval identity through resolution. This closes the gap
+      // between reading an approval and resolving its path, and permits an
+      // explicitly reapproved replacement without restarting the connector.
+      const workspace = { id: await workspaceId(canonical), name: path.basename(canonical) || canonical,
+        path: canonical, dev: directory.dev, ino: directory.ino };
+      this.#known.set(canonical, Promise.resolve(workspace));
+      return workspace;
+    }
     let entry = this.#known.get(canonical);
     if (!entry) {
       entry = (async () => {

@@ -67,32 +67,37 @@ The plugin includes a versioned HPKE authenticated envelope using P-256, HKDF-SH
 
 OpenCode loads the plugin once per project directory, and every instance shares the same connector identity. Only one instance holds the connection to the service at a time; the others wait and take over if it exits.
 
-Directories are set up automatically. Each running instance announces its own directory in the private Open Remote Code data directory, and the connected instance serves every announced directory, so the app sees a project as soon as OpenCode is launched in it and stops seeing it when OpenCode exits there (a crashed instance is dropped within seconds). Where you install the plugin decides the scope:
+Folders are **opt-in**. In the OpenCode TUI, open the project you want to share,
+run `/remote`, choose **Enable remote access for this folder**, and confirm the
+full canonical path. The same dialog shows **Enabled** and offers **Disable
+remote access for this folder** once approved. Refresh Projects in the phone to
+see the change. Opening another folder does not approve it.
 
-- **Installed globally**, every folder you launch OpenCode in becomes available in the app.
-- **Installed in one project** (`<project>/.opencode/plugins/`), only that project is available.
+Approvals are stored privately beside the connector identity and shared by TUIs
+using that data directory. They survive TUI exits and restarts. Disabling a folder
+denies subsequent reads and commands, discards in-flight read results, and closes
+idle chat streams within approximately one second (MCP subscriptions recheck on
+their next poll). It does not delete local chats or undo work already admitted to
+OpenCode. Folder replacements and changed symlink targets require new approval.
 
-`projectDirectories` remains as an optional way to add exact absolute directories that no running instance announces:
+**Migration:** no folders are enabled by default, including for an existing
+pairing. Live TUI directory announcements and the old `projectDirectories` option
+no longer grant access. Approve each desired folder through `/remote`. The mobile
+app no longer offers **Open project by path**, even with an older connector.
+The legacy protocol operation remains confined to already approved paths.
 
-```json
-{
-  "plugins": [
-    {
-      "package": "@openremotecode/opencode",
-      "options": { "projectDirectories": ["/home/me/project-one", "/home/me/project-two"] }
-    }
-  ]
-}
-```
-
-The app's **Open project by path** only opens a directory that is currently available this way.
+**Hosting is unchanged in this milestone:** approvals persist, but the connector
+still needs at least one TUI running to serve them. `opencode service start` alone
+does not start this connector. Moving the relay into the server plugin requires
+supported OpenCode APIs that the current server context does not yet provide.
+See [persistent folder approvals](docs/adr/0017-explicit-folder-approvals.md).
 
 ### Sessions that change directory
 
 OpenCode can move a chat while the agent works. An already authorized chat keeps
 its original mobile project/session handle: streaming, history, prompts and
-permission replies continue without restarting OpenCode or editing
-`projectDirectories`. Moved chats remain discoverable under the original project.
+permission replies continue without restarting OpenCode or approving the
+destination. Moved chats remain discoverable under the original approved project.
 The plugin always reads the current location from OpenCode; following a chat does
 not authorize other chats or project access in its destination folder.
 

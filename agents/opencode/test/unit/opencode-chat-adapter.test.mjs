@@ -8,6 +8,8 @@ import { OpenCodeChatAdapter } from "../../dist/opencode/chat-adapter.js"
 import { OpenCodeSessionReader } from "../../dist/opencode/sessions.js"
 import { WorkspaceRegistry } from "../../dist/chat/workspace.js"
 import { announceDirectory, liveDirectories, liveSessionIds } from "../../dist/directory-presence.js"
+import { FileFolderApprovalStore } from "../../dist/folder-approvals.js"
+import { OpenCodeMcpReader } from "../../dist/opencode/mcp.js"
 
 const NOW = 1_788_115_200_000
 
@@ -120,6 +122,103 @@ test("advertises exactly the operations it implements", async (t) => {
     "chat.fork", "chat.get", "chat.images", "chat.list", "chat.models", "chat.permission.reply", "chat.permissions", "chat.prompt",
     "chat.prompt.mode", "chat.prompt.model", "chat.question.reply", "chat.questions", "chat.shell", "chat.snapshot", "chat.subtask.snapshot",
     "chat.tools", "project.list", "project.open"])
+})
+
+test("only persistent approvals grant projects; disabling denies saved handles, moved chats, MCP and legacy reads", async (t) => {
+  const { client, root, other, add, sessions, calls } = await fixture(t)
+  const store = new FileFolderApprovalStore(path.join(root, "private", "approved-folders"))
+  const registry = new WorkspaceRegistry(undefined, [], () => store.list())
+  const adapter = new OpenCodeChatAdapter(client, root, [other], registry)
+  const reader = new OpenCodeSessionReader(client, root, registry)
+  assert.deepEqual(await adapter.execute("project.list", {}), { version: 1, projects: [], pathEntry: false })
+  await assert.rejects(adapter.execute("project.open", { path: root }), { code: "access_denied" })
+  await assert.rejects(reader.listSessions(), { code: "access_denied" })
+  assert.deepEqual(calls, [])
+  const approved = await store.inspect(root)
+  await store.setEnabled(approved, true)
+  const { projects: [project] } = await adapter.execute("project.list", {})
+  add("ses_moving"); add("ses_other", { location: { directory: other } })
+  assert.equal((await reader.listSessions()).length, 1)
+  const body = { version: 1, projectId: project.id, sessionId: "ses_moving" }
+  await adapter.execute("chat.get", body)
+  sessions.get("ses_moving").location.directory = other
+  assert.equal((await adapter.execute("chat.get", body)).chat.id, "ses_moving")
+  await store.setEnabled(approved, false)
+  const before = calls.length
+  for (const operation of ["chat.list", "chat.get", "chat.snapshot", "chat.prompt", "chat.abort", "chat.models",
+    "chat.permission.reply", "chat.question.reply", "chat.fork", "chat.delete"]) {
+    await assert.rejects(adapter.execute(operation, body), { code: "context_expired" })
+  }
+  await assert.rejects(adapter.readChat(body, new AbortController().signal), { code: "context_expired" })
+  await assert.rejects(new OpenCodeMcpReader(client, registry).readProjectMcp(project.id, new AbortController().signal),
+    { code: "context_expired" })
+  await assert.rejects(reader.listSessions(), { code: "access_denied" })
+  assert.equal(calls.length, before, "no SDK call after local disable, even for known moved chats")
+  assert.deepEqual((await adapter.execute("project.list", {})).projects, [])
+})
+
+test("revoking approval during an SDK read discards the in-flight result", async (t) => {
+  const { client, root, add } = await fixture(t)
+  const store = new FileFolderApprovalStore(path.join(root, "private", "approved-folders"))
+  const approved = await store.inspect(root)
+  await store.setEnabled(approved, true)
+  const registry = new WorkspaceRegistry(undefined, [], () => store.list())
+  const adapter = new OpenCodeChatAdapter(client, root, [], registry)
+  const { projects: [project] } = await adapter.execute("project.list", {})
+  add("ses_1")
+  const originalList = client.session.list
+  client.session.list = async (...args) => {
+    const data = await originalList(...args)
+    await store.setEnabled(approved, false)
+    return data
+  }
+  await assert.rejects(adapter.execute("chat.list", { projectId: project.id }), { code: "context_expired" })
+  await store.setEnabled(approved, true)
+  client.session.list = originalList
+  const originalMessages = client.message.list
+  client.message.list = async (...args) => {
+    const data = await originalMessages(...args)
+    await store.setEnabled(approved, false)
+    return data
+  }
+  await assert.rejects(adapter.readChat({ projectId: project.id, sessionId: "ses_1" }, new AbortController().signal),
+    { code: "context_expired" })
+})
+
+test("disabling a folder ends an idle event subscription without an SDK poll or a model event", async (t) => {
+  const { client, root, add, calls } = await fixture(t)
+  add("ses_1")
+  const store = new FileFolderApprovalStore(path.join(root, "private", "approved-folders"))
+  const approved = await store.inspect(root)
+  await store.setEnabled(approved, true)
+  const registry = new WorkspaceRegistry(undefined, [], () => store.list())
+  const adapter = new OpenCodeChatAdapter(client, root, [], registry)
+  const { projects: [project] } = await adapter.execute("project.list", {})
+  const controller = new AbortController()
+  let connected
+  const ready = new Promise((resolve) => { connected = resolve })
+  const original = client.event.subscribe
+  client.event.subscribe = (options) => { connected(); return original(options) }
+  const watching = adapter.watchChat({ projectId: project.id, sessionId: "ses_1" }, controller.signal,
+    () => assert.fail("no event was sent"))
+  const ended = assert.rejects(watching, /stream ended/)
+  const timer = setTimeout(() => controller.abort(), 3000)
+  t.after(() => { clearTimeout(timer); controller.abort() })
+  await ready
+  const count = calls.length
+  await store.setEnabled(approved, false)
+  await ended
+  assert.equal(controller.signal.aborted, false, "authorization, not the test timeout, must end the watcher")
+  assert.equal(calls.length, count, "local monitoring does not poll OpenCode")
+})
+
+test("legacy session reads never trust a native directory filter that includes an unapproved folder", async (t) => {
+  const { client, root, other, add, sessions } = await fixture(t)
+  const registry = new WorkspaceRegistry(root)
+  add("ses_foreign", { location: { directory: other } })
+  client.session.list = async () => ({ data: [...sessions.values()], cursor: {} })
+  const reader = new OpenCodeSessionReader(client, root, registry)
+  await assert.rejects(reader.listSessions(), { code: "access_denied" })
 })
 
 test("operations outside the implemented set fail as unsupported, not as generic errors", async (t) => {

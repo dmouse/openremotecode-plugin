@@ -24,6 +24,7 @@ import {
 
 import { setupConnector } from "../../dist/opencode/setup.js"
 import { OpenCodeChatAdapter } from "../../dist/opencode/chat-adapter.js"
+import { FileFolderApprovalStore, resolveFolderApprovalsPath } from "../../dist/folder-approvals.js"
 
 // Runs the connector against a real OpenCode server through the real promise client. The
 // plugin does not depend on any OpenCode package, so both are supplied from outside:
@@ -89,6 +90,7 @@ test("an OpenCode TUI connector serves encrypted chat operations through the rel
   // The connector keeps its identity under XDG_DATA_HOME; keep this test's out of the developer's.
   Object.assign(process.env, {
     XDG_DATA_HOME: dirs.data,
+    OPENCODE_REMOTE_DATA_DIR: path.join(dirs.data, "remote"),
     OPENCODE_REMOTE_ALLOW_INSECURE_LOOPBACK: "true",
     OPENCODE_REMOTE_RELAY_URL: `ws://127.0.0.1:${relay.address().port}`,
     OPENCODE_REMOTE_TRUSTED_CLIENT_IDENTITY: JSON.stringify(client.identity.publicIdentity),
@@ -144,9 +146,13 @@ test("an OpenCode TUI connector serves encrypted chat operations through the rel
     return reply
   }
 
+  const approvals = new FileFolderApprovalStore(resolveFolderApprovalsPath())
+  assert.deepEqual((await call("project.list", { version: 1 })).body.projects, [], "loading a TUI grants no folders")
+  await approvals.setEnabled(await approvals.inspect(workspace), true)
   const projects = await call("project.list", { version: 1 })
   assert.equal(projects.kind, "response")
   assert.deepEqual(projects.body.projects.map((p) => p.path), [workspace])
+  assert.equal(projects.body.pathEntry, false)
   const projectId = projects.body.projects[0].id
   // OpenCode warms MCP connections asynchronously after resolving a location.
   // Wait for the configured server before asserting the remote snapshot.
@@ -548,6 +554,31 @@ test("an OpenCode TUI connector serves encrypted chat operations through the rel
     listCursor = next.body.cursor
   }
   assert.ok(nativeIds.every((id) => listedIds.has(id)), "every native session survives reduced-page continuation")
+
+  const revokedTarget = { version: 1, projectId, sessionId: nativeIds[0], subscriptionId: crypto.randomUUID() }
+  const closedSubscriptions = []
+  const onClosed = (data) => { void decryptRelayEnvelope({ recipient: client.identity, sender: message.identity,
+    envelope: JSON.parse(data.toString()), epoch }).then((payload) => {
+      if (payload.kind === "event" && payload.operation === "chat.stream.closed") closedSubscriptions.push(payload.body)
+    }, () => {}) }
+  connection.socket.on("message", onClosed)
+  const beforeDisable = await call("chat.stream.subscribe", revokedTarget)
+  assert.equal(beforeDisable.body.snapshot.chat.id, revokedTarget.sessionId)
+  await approvals.setEnabled(await approvals.inspect(workspace), false)
+  const revokeDeadline = Date.now() + 5_000
+  while (!closedSubscriptions.some((event) => event.subscriptionId === revokedTarget.subscriptionId)) {
+    assert.ok(Date.now() < revokeDeadline, "local folder disable must close the encrypted idle stream")
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  connection.socket.off("message", onClosed)
+  assert.deepEqual((await call("project.list", { version: 1 })).body.projects, [])
+  const denied = await call("chat.get", { version: 1, projectId, sessionId: chatId })
+  assert.equal(denied.operation, "protocol.error")
+  assert.equal(denied.body.code, "context_expired")
+  const deniedMcp = await call("project.mcp.snapshot", { version: 1, projectId })
+  assert.equal(deniedMcp.body.code, "context_expired")
+  const legacy = await call("session.list", {})
+  assert.equal(legacy.operation, "protocol.error")
 
   // Pairing is skipped on the development relay path, so nothing was shown to the user.
   assert.deepEqual(toasts, [])

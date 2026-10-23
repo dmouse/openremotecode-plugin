@@ -16,15 +16,12 @@ export interface PresenceOptions {
   sessionIds?: () => readonly string[]
 }
 
-/// OpenCode loads the plugin once per directory it is launched in, but only one instance holds
-/// the relay connection, so the holder cannot see the directories of the others. Each instance
-/// therefore announces its own directory here for as long as it runs, and the holder serves the
-/// union. This is what makes a globally installed plugin reach every folder OpenCode is used in,
-/// while a plugin installed in one project announces only that project: access follows where the
-/// plugin is actually loaded, with no configuration.
+/// One instance holds the relay connection; these local announcements let it
+/// recover locally open moved chats from another TUI. Directory access itself
+/// comes only from persistent folder approvals, never these announcements.
 ///
 /// An announcement is a file whose modification time is refreshed while the instance lives, so a
-/// crashed instance stops granting access within the stale window instead of forever. The file
+/// crashed instance stops offering local recovery candidates within the stale window. The file
 /// holds the launch directory and bounded IDs of locally open tabs, never chat content. It sits
 /// in the same private data directory as the connector's identity.
 export function announceDirectory(options: PresenceOptions): { stop(): Promise<void> } {

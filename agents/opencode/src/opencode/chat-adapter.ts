@@ -1,4 +1,5 @@
 import { realpath } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { chatRequests, chatSummarySchema, type ChatOperation, type ChatStreamTarget } from "@openremotecode/protocol";
 import { ChatAccessError, ChatUnsupportedError, type ChatAdapter } from "../chat-adapter.js";
@@ -115,13 +116,19 @@ export class OpenCodeChatAdapter implements ChatAdapter, ChatStreamReader {
   async execute(operation: ChatOperation, body: Record<string, unknown>, cancellation?: AbortSignal): Promise<unknown> {
     if (!Object.hasOwn(chatRequests, operation)) throw new ChatUnsupportedError(operation);
     if (!(OPERATIONS as readonly string[]).includes(operation)) throw new ChatUnsupportedError(operation);
-    return this.#run(operation as Supported, body, cancellation);
+    const result = await this.#run(operation as Supported, body, cancellation);
+    // Do not return content fetched while a local user disabled the folder.
+    // Mutations already admitted to OpenCode are not undone or automatically retried.
+    if (["chat.list", "chat.get", "chat.models", "chat.snapshot", "chat.subtask.snapshot"].includes(operation)) {
+      await this.#registry.get(body.projectId);
+    }
+    return result;
   }
 
   async #run(operation: Supported, body: Record<string, unknown>, cancellation?: AbortSignal): Promise<unknown> {
     if (operation === "project.list") {
       const projects = await this.#registry.listVerified();
-      return { version: 1, projects: projects.map((w) => this.#registry.public(w)), pathEntry: true };
+      return { version: 1, projects: projects.map((w) => this.#registry.public(w)), pathEntry: false };
     }
     if (operation === "project.open") {
       const workspace = await this.#registry.resolvePath(String(body.path));
@@ -261,6 +268,7 @@ export class OpenCodeChatAdapter implements ChatAdapter, ChatStreamReader {
       // Resolving against the question the connector itself just observed is what keeps
       // client-supplied answers from reaching the agent unverified. See ADR 0011 / 0013.
       if (pending?.id !== reply.questionId) throw new ChatAccessError("context_expired");
+      await this.#registry.get(workspace.id);
       const { result, recorded } = await replyToQuestion(this.#client, sessionId, pending, reply, options().signal);
       this.#answeredQuestions.record(sessionId, recorded);
       return result;
@@ -294,12 +302,15 @@ export class OpenCodeChatAdapter implements ChatAdapter, ChatStreamReader {
       }
       // Switched first and awaited, so the turn cannot start on the old agent or model.
       if (switchAgent && prompt.mode !== undefined) {
+        await this.#registry.get(workspace.id);
         await this.#client.session.switchAgent({ sessionID: sessionId, agent: prompt.mode }, options());
       }
       if (switchModel) {
+        await this.#registry.get(workspace.id);
         await this.#client.session.switchModel({ sessionID: sessionId, model: { id: model.modelID,
           providerID: model.providerID, ...(model.effort !== undefined ? { variant: model.effort } : {}) } }, options());
       }
+      await this.#registry.get(workspace.id);
       await this.#client.session.prompt({ sessionID: sessionId, text: prompt.text }, options());
       return { version: 1, accepted: true };
     }
@@ -319,15 +330,27 @@ export class OpenCodeChatAdapter implements ChatAdapter, ChatStreamReader {
     const owned = await this.#owned(workspace, target.sessionId, this.#deadline(signal));
     if (owned.parentID) throw new ChatAccessError("access_denied");
     signal.throwIfAborted();
-    for await (const event of openCodeEvents(this.#client, signal)) {
-      if (signal.aborted) return;
-      this.observeEvent(event);
-      // Unblocks the caller's initial read.
-      if (event.type === "server.connected") { changed(false); continue; }
-      if (event.type === FATAL_EVENT) throw new Error("Chat source disposed");
-      if (eventSessionId(event) !== target.sessionId) continue;
-      changed(false);
-    }
+    const controller = new AbortController();
+    const watching = AbortSignal.any([signal, controller.signal]);
+    // Cross-process local revocation must also close an idle stream, without
+    // waiting for a model token or the phone's next renewal. No SDK polling.
+    const monitor = (async () => {
+      while (!watching.aborted) {
+        await delay(1000, undefined, { signal: watching, ref: false });
+        await this.#registry.get(target.projectId);
+      }
+    })().catch(() => { controller.abort(); });
+    try {
+      for await (const event of openCodeEvents(this.#client, watching)) {
+        if (watching.aborted) break;
+        this.observeEvent(event);
+        // Unblocks the caller's initial read.
+        if (event.type === "server.connected") { changed(false); continue; }
+        if (event.type === FATAL_EVENT) throw new Error("Chat source disposed");
+        if (eventSessionId(event) !== target.sessionId) continue;
+        changed(false);
+      }
+    } finally { controller.abort(); await monitor; }
     if (!signal.aborted) throw new Error("Chat event stream ended");
   }
 
@@ -398,6 +421,7 @@ export class OpenCodeChatAdapter implements ChatAdapter, ChatStreamReader {
       throw error;
     }
     const found = session.parse(raw);
+    await this.#registry.get(workspace.id);
     // Session-by-ID lookups are not scoped to a directory, so membership is checked here.
     if (found.id !== sessionId) throw new ChatAccessError("access_denied");
     const canAdopt = locallyOpen || !this.#continuity.knows(sessionId, workspace) &&
