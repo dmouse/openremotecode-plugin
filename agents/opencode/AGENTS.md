@@ -108,6 +108,13 @@ A connector has a persistent identity. Each active plugin process advertises an 
 
 Every instance announces its directory in the private data directory (`src/directory-presence.ts`) for as long as it runs, and the connection holder serves the union of live announcements plus the optional `projectDirectories`. Access therefore follows where the plugin is loaded: a global install reaches every folder OpenCode runs in, a per-project install only that project. Announcements expire when their heartbeat stops, are validated as hostile input, and never leave the machine as routing metadata.
 
+Project handles stay anchored to the TUI launch directory. Already authorized root
+sessions follow authoritative OpenCode moves under the same mobile handle, without
+granting the destination directory or its other sessions. Presence also carries
+bounded IDs of locally open TUI root tabs for cross-instance recovery, not the
+global cached session list. See `docs/adr/0016-moved-session-continuity.md` for the
+session-specific authorization policy and its bounded in-memory lifetime.
+
 ## Reliability and Resource Limits
 
 - Use bounded command and event queues.

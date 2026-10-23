@@ -1,11 +1,13 @@
 import assert from "node:assert/strict"
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rename, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
 import { ChatAccessError, ChatUnsupportedError } from "../../dist/chat-adapter.js"
 import { OpenCodeChatAdapter } from "../../dist/opencode/chat-adapter.js"
 import { OpenCodeSessionReader } from "../../dist/opencode/sessions.js"
+import { WorkspaceRegistry } from "../../dist/chat/workspace.js"
+import { announceDirectory, liveDirectories, liveSessionIds } from "../../dist/directory-presence.js"
 
 const NOW = 1_788_115_200_000
 
@@ -16,7 +18,7 @@ async function fixture(t) {
   const sessions = new Map()
   const calls = []
   const state = { active: {}, permissions: [], messages: new Map(), models: [], providers: new Map(),
-    forms: [], formOutcomes: [], forkResult: undefined, forkError: undefined, removalKeeps: false,
+    forms: [], formOutcomes: [], forkResult: undefined, forkError: undefined, removalKeeps: false, localSessions: [],
     // Overridden per test; default yields nothing so a subscription just idles until aborted.
     events: (signal) => ({ [Symbol.asyncIterator]: () => ({
       next: () => new Promise((resolve) => signal.addEventListener("abort", () => resolve({ done: true, value: undefined }))) }) }) }
@@ -30,7 +32,9 @@ async function fixture(t) {
           (input.directory === undefined || s.location.directory === input.directory) &&
           (input.parentID === null ? !s.parentID : s.parentID === input.parentID))
         // Real OpenCode always returns a next cursor, even on the last page.
-        return { data: data.slice(0, input.limit), cursor: { next: "native-next", previous: "native-prev" } }
+        const start = input.cursor === "native-next" ? 50 : Number(input.cursor?.replace("native:", "") ?? 0)
+        const next = start === 0 && input.limit === 50 ? "native-next" : `native:${start + input.limit}`
+        return { data: data.slice(start, start + input.limit), cursor: { next, previous: "native-prev" } }
       },
       create: async (input, options) => {
         calls.push(["session.create", input, options])
@@ -104,9 +108,10 @@ async function fixture(t) {
     permission: { list: async (input, options) => { calls.push(["permission.list", input, options]); return state.permissions },
       reply: async (input, options) => { calls.push(["permission.reply", input, options]) } },
   }
-  const adapter = new OpenCodeChatAdapter(client, root)
+  const adapter = new OpenCodeChatAdapter(client, root, [], undefined,
+    (workspace) => workspace.path === root ? state.localSessions : [])
   const { projects } = await adapter.execute("project.list", {})
-  return { root, other, sessions, add, calls, adapter, projectId: projects[0].id, state }
+  return { root, other, sessions, add, calls, client, adapter, projectId: projects[0].id, state }
 }
 
 test("advertises exactly the operations it implements", async (t) => {
@@ -165,6 +170,179 @@ test("a session outside the workspace is denied even if the server filter is ign
   await assert.rejects(adapter.execute("chat.get", { version: 1, projectId, sessionId: "ses_1" }), { code: "access_denied" })
 })
 
+test("an open chat keeps its original project handle after repeated authoritative moves", async (t) => {
+  const { adapter, projectId, root, other, sessions, add, state, calls } = await fixture(t)
+  add("ses_mobile"); add("ses_foreign", { location: { directory: other } })
+  state.messages.set("ses_mobile", [user(0), assistant(0, [{ type: "text", text: "answer" }])])
+  const body = { version: 1, projectId, sessionId: "ses_mobile" }
+  await adapter.execute("chat.get", body)
+  for (const directory of [other, root, other]) {
+    sessions.get("ses_mobile").location.directory = directory
+    // No event is needed to recover an open chat after a missed notification or relay reconnect.
+    const snapshot = await adapter.readChat({ ...body, subscriptionId: crypto.randomUUID() }, new AbortController().signal)
+    assert.equal(snapshot.chat.id, "ses_mobile")
+    assert.equal(snapshot.messages.length, 2)
+    assert.deepEqual(await adapter.execute("chat.prompt", { ...body, text: "continue" }), { version: 1, accepted: true })
+    assert.deepEqual(await adapter.execute("chat.abort", body), { version: 1, accepted: true })
+    await adapter.execute("chat.permission.reply", { ...body, permissionId: "per_move", response: "once" })
+  }
+  state.models = MODELS
+  await adapter.execute("chat.prompt", { ...body, text: "continue", model: { providerID: "acme", modelID: "m1" } })
+  assert.equal(calls.filter(([name]) => name === "model.list").at(-1)[1].location.directory, other)
+  await assert.rejects(adapter.execute("chat.get", { ...body, sessionId: "ses_foreign" }), { code: "access_denied" })
+  await assert.rejects(adapter.execute("project.open", { version: 1, path: other }), { code: "access_denied" })
+  assert.deepEqual((await adapter.execute("project.list", {})).projects.map((p) => p.path), [root],
+    "continuity never grants the destination directory")
+})
+
+test("moved chats remain in the original list while mobile is disconnected", async (t) => {
+  const { adapter, projectId, other, add, sessions } = await fixture(t)
+  add("ses_moved"); add("ses_stays")
+  await adapter.execute("chat.list", { version: 1, projectId })
+  sessions.get("ses_moved").location.directory = other
+  adapter.observeEvent({ type: "session.moved", data: { sessionID: "ses_moved", location: { directory: "/untrusted" } } })
+  const listed = await adapter.execute("chat.list", { version: 1, projectId })
+  assert.deepEqual(listed.chats.map((c) => c.id), ["ses_moved", "ses_stays"])
+  assert.equal(listed.cursor, null)
+  sessions.delete("ses_moved")
+  assert.deepEqual((await adapter.execute("chat.list", { version: 1, projectId })).chats.map((c) => c.id), ["ses_stays"])
+})
+
+test("reconnect reconciliation and pagination preserve more than fifty moved chats", async (t) => {
+  const { adapter, projectId, add, sessions, other } = await fixture(t)
+  for (let i = 0; i < 53; i++) add(`ses_${i}`)
+  const first = await adapter.execute("chat.list", { version: 1, projectId })
+  await adapter.execute("chat.list", { version: 1, projectId, cursor: first.cursor })
+  for (const value of sessions.values()) value.location.directory = other
+  adapter.observeEvent({ type: "server.connected" }) // Move events were missed while the local transport was down.
+  const found = []
+  let cursor
+  do {
+    const page = await adapter.execute("chat.list", { version: 1, projectId, ...(cursor ? { cursor } : {}) })
+    assert.ok(page.chats.length <= 50)
+    found.push(...page.chats.map((c) => c.id))
+    cursor = page.cursor
+    assert.ok(found.length <= 53, "pagination must terminate without duplicates")
+  } while (cursor)
+  assert.equal(new Set(found).size, 53)
+})
+
+test("moved chats stay on the first page without skipping native chats or changing their cursor scope", async (t) => {
+  const { adapter, projectId, add, sessions, other, calls } = await fixture(t)
+  add("ses_moved")
+  await adapter.execute("chat.get", { version: 1, projectId, sessionId: "ses_moved" })
+  sessions.get("ses_moved").location.directory = other
+  adapter.observeEvent({ type: "session.moved", data: { sessionID: "ses_moved" } })
+  for (let i = 0; i < 101; i++) add(`ses_native_${i}`)
+  const first = await adapter.execute("chat.list", { version: 1, projectId })
+  assert.equal(first.chats[0].id, "ses_moved")
+  assert.equal(first.chats.length, 50)
+  assert.equal(calls.find(([name]) => name === "session.list")[1].limit, 49)
+  adapter.observeEvent({ type: "server.connected" })
+  const ids = first.chats.map((c) => c.id)
+  let cursor = first.cursor
+  while (cursor) {
+    const next = await adapter.execute("chat.list", { version: 1, projectId, cursor })
+    ids.push(...next.chats.map((c) => c.id))
+    cursor = next.cursor
+    assert.ok(ids.length <= 102)
+  }
+  assert.equal(new Set(ids).size, 102)
+  assert.equal(ids.length, 102)
+  const reconnected = await adapter.execute("chat.list", { version: 1, projectId })
+  assert.ok(reconnected.chats.length > 0, "dirty unchanged sessions must not hide the native first page")
+})
+
+test("only locally open TUI sessions can recover a move predating adapter startup", async (t) => {
+  const { adapter, projectId, state, other, add } = await fixture(t)
+  add("ses_local", { location: { directory: other } })
+  add("ses_hidden", { location: { directory: other } })
+  state.localSessions = ["ses_local"]
+  adapter.observeEvent({ type: "session.moved", data: { sessionID: "ses_hidden" } })
+  const listed = await adapter.execute("chat.list", { version: 1, projectId })
+  assert.deepEqual(listed.chats.map((c) => c.id), ["ses_local"])
+  await assert.rejects(adapter.execute("chat.get", { version: 1, projectId, sessionId: "ses_hidden" }), { code: "access_denied" })
+  state.localSessions = []
+  assert.equal((await adapter.execute("chat.get", { version: 1, projectId, sessionId: "ses_local" })).chat.id, "ses_local")
+})
+
+test("the connection holder recovers a standby TUI's moved tab without authorizing its destination", async (t) => {
+  const { root, other, add, client } = await fixture(t)
+  const destination = path.join(root, "destination"); await mkdir(destination)
+  add("ses_standby", { location: { directory: destination } })
+  add("ses_foreign", { location: { directory: destination } })
+  const presencePath = path.join(root, "presence")
+  const presence = announceDirectory({ presencePath, directory: other, sessionIds: () => ["ses_standby"] })
+  t.after(() => presence.stop())
+  // Wait for the independent TUI's first heartbeat, not a global session enumeration.
+  for (let i = 0; !(await liveSessionIds(presencePath, other)).length; i++) {
+    assert.ok(i < 100)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  const registry = new WorkspaceRegistry(root, [], () => liveDirectories(presencePath))
+  const holder = new OpenCodeChatAdapter(client, root, [], registry, (workspace) => liveSessionIds(presencePath, workspace.path))
+  const projectId = (await holder.execute("project.list", {})).projects.find((p) => p.path === other).id
+  const body = { version: 1, projectId }
+  assert.deepEqual((await holder.execute("chat.list", body)).chats.map((c) => c.id), ["ses_standby"])
+  await assert.rejects(holder.execute("chat.get", { ...body, sessionId: "ses_foreign" }), { code: "access_denied" })
+  await assert.rejects(holder.execute("project.open", { version: 1, path: destination }), { code: "access_denied" })
+  await presence.stop()
+  await assert.rejects(holder.execute("chat.get", { ...body, sessionId: "ses_standby" }), { code: "context_expired" },
+    "continuity cannot bypass expiry of the original workspace authorization")
+})
+
+test("a moved chat keeps its history cursor and uses the current directory for a fork", async (t) => {
+  const { adapter, projectId, state, other, add, sessions } = await fixture(t)
+  add("ses_1")
+  state.messages.set("ses_1", Array.from({ length: 12 }, (_, i) => user(i)))
+  const body = { version: 1, projectId, sessionId: "ses_1" }
+  const first = await adapter.execute("chat.snapshot", body)
+  sessions.get("ses_1").location.directory = other
+  const older = await adapter.execute("chat.snapshot", { ...body, cursor: first.cursor })
+  assert.equal(older.messages.length, 2)
+  assert.equal(older.cursor, null)
+  add("ses_fork", { fork: { sessionID: "ses_1" }, location: { directory: other } })
+  state.forkResult = sessions.get("ses_fork")
+  assert.equal((await adapter.execute("chat.fork", body)).chat.id, "ses_fork")
+  assert.deepEqual(await adapter.execute("chat.delete", { ...body, sessionId: "ses_fork" }), { version: 1, deleted: true })
+})
+
+test("a moved chat refuses replaced destinations and symlink retargeting", async (t) => {
+  const { adapter, projectId, root, other, add, sessions } = await fixture(t)
+  add("ses_1")
+  const body = { version: 1, projectId, sessionId: "ses_1" }
+  await adapter.execute("chat.get", body)
+  const link = path.join(root, "link")
+  await symlink(other, link)
+  sessions.get("ses_1").location.directory = link
+  await adapter.execute("chat.get", body)
+  await rm(link)
+  await symlink(root, link)
+  await assert.rejects(adapter.execute("chat.get", body), { code: "access_denied" })
+  sessions.get("ses_1").location.directory = other
+  await rename(other, `${other}-previous`)
+  await mkdir(other)
+  await assert.rejects(adapter.execute("chat.get", body), { code: "access_denied" })
+})
+
+test("a moved root can read and delete its verified children, never a foreign descendant", async (t) => {
+  const { adapter, projectId, other, add, sessions, calls } = await fixture(t)
+  add("ses_parent")
+  const body = { version: 1, projectId, sessionId: "ses_parent" }
+  await adapter.execute("chat.get", body)
+  sessions.get("ses_parent").location.directory = other
+  add("ses_child", { parentID: "ses_parent", location: { directory: other } })
+  const child = { version: 1, projectId, parentSessionId: "ses_parent", sessionId: "ses_child" }
+  assert.equal((await adapter.execute("chat.subtask.snapshot", child)).chat.parentId, "ses_parent")
+  await assert.rejects(adapter.execute("chat.get", { ...body, sessionId: "ses_child" }), { code: "access_denied" })
+  add("ses_foreign_child", { parentID: "ses_child" })
+  await assert.rejects(adapter.execute("chat.delete", body), { code: "access_denied" })
+  assert.equal(calls.some(([name]) => name === "session.remove"), false)
+  sessions.delete("ses_foreign_child")
+  assert.deepEqual(await adapter.execute("chat.delete", body), { version: 1, deleted: true })
+  assert.equal(sessions.has("ses_child"), false)
+})
+
 test("chat.create verifies ownership and get maps a missing session to chat_not_found", async (t) => {
   const { adapter, projectId, root, calls } = await fixture(t)
   const created = await adapter.execute("chat.create", { version: 1, projectId })
@@ -172,6 +350,14 @@ test("chat.create verifies ownership and get maps a missing session to chat_not_
   assert.deepEqual(calls.find(([name]) => name === "session.create")[1], { location: { directory: root } })
   assert.deepEqual(await adapter.execute("chat.get", { version: 1, projectId, sessionId: "ses_new" }), created)
   await assert.rejects(adapter.execute("chat.get", { version: 1, projectId, sessionId: "ses_missing" }), { code: "chat_not_found" })
+})
+
+test("creation that cannot be confirmed is uncertain and cannot grant a foreign chat", async (t) => {
+  const { adapter, projectId, client, other, add } = await fixture(t)
+  add("ses_foreign", { location: { directory: other } })
+  client.session.create = async () => ({ id: "ses_foreign" })
+  await assert.rejects(adapter.execute("chat.create", { version: 1, projectId }), /Created chat could not be confirmed/)
+  await assert.rejects(adapter.execute("chat.get", { version: 1, projectId, sessionId: "ses_foreign" }), { code: "access_denied" })
 })
 
 test("fork and delete are confined to an idle root session in the authorized project", async (t) => {
@@ -220,6 +406,13 @@ test("a fork response for another project, a subtask, or a different source neve
   state.forkResult = { ...sessions.get("ses_1"), id: "ses_missing_fork", fork: { sessionID: "ses_1" } }
   await assert.rejects(adapter.execute("chat.fork", { version: 1, projectId, sessionId: "ses_1" }),
     /Fork could not be confirmed/)
+  // A plausible mutation response must not grant continuity before the independent get
+  // confirms that the new session really belongs to the source's current directory.
+  state.forkResult = { ...sessions.get("ses_1"), id: "ses_impostor", fork: { sessionID: "ses_1" } }
+  add("ses_impostor", { location: { directory: other }, fork: { sessionID: "ses_1" } })
+  await assert.rejects(adapter.execute("chat.fork", { version: 1, projectId, sessionId: "ses_1" }),
+    /Fork could not be confirmed/)
+  await assert.rejects(adapter.execute("chat.get", { version: 1, projectId, sessionId: "ses_impostor" }), { code: "access_denied" })
   state.forkError = { _tag: "InvalidRequestError", kind: "empty_session", message: "contains native details" }
   await assert.rejects(adapter.execute("chat.fork", { version: 1, projectId, sessionId: "ses_1" }),
     { code: "context_expired" })

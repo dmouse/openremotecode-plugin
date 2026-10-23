@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, realpath, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -13,6 +13,7 @@ export interface PresenceOptions {
   presencePath: string
   directory: string
   heartbeatMs?: number
+  sessionIds?: () => readonly string[]
 }
 
 /// OpenCode loads the plugin once per directory it is launched in, but only one instance holds
@@ -24,12 +25,11 @@ export interface PresenceOptions {
 ///
 /// An announcement is a file whose modification time is refreshed while the instance lives, so a
 /// crashed instance stops granting access within the stale window instead of forever. The file
-/// holds only the directory path and sits in the same private data directory as the connector's
-/// identity, so it grants nothing to anyone who could not already read that.
+/// holds the launch directory and bounded IDs of locally open tabs, never chat content. It sits
+/// in the same private data directory as the connector's identity.
 export function announceDirectory(options: PresenceOptions): { stop(): Promise<void> } {
   const file = path.join(options.presencePath, `${crypto.randomUUID()}.json`);
   const controller = new AbortController();
-  const record = `${JSON.stringify({ version: 1, directory: options.directory })}\n`;
   const heartbeatMs = options.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
 
   const run = (async (): Promise<void> => {
@@ -38,6 +38,8 @@ export function announceDirectory(options: PresenceOptions): { stop(): Promise<v
         await mkdir(options.presencePath, { recursive: true, mode: 0o700 });
         if (process.platform !== "win32") await chmod(options.presencePath, 0o700);
         const now = new Date();
+        const sessionIds = [...new Set(options.sessionIds?.() ?? [])].filter(validSessionId).slice(0, 64);
+        const record = `${JSON.stringify({ version: 1, directory: options.directory, sessionIds })}\n`;
         // Rewritten rather than only touched, so a directory cleared by a stale sweep comes back.
         await writeFile(file, record, { mode: 0o600 });
         await utimes(file, now, now);
@@ -64,18 +66,38 @@ export async function liveDirectories(
   presencePath: string,
   staleAfterMs: number = DEFAULT_STALE_AFTER_MS,
 ): Promise<string[]> {
+  return [...new Set((await liveAnnouncements(presencePath, staleAfterMs)).map((entry) => entry.directory))]
+    .sort().slice(0, MAX_DIRECTORIES);
+}
+
+/// Only sessions explicitly open in a local TUI, never its server-wide cached session list.
+/// The holder can recover these chats even if another TUI moved them before it took ownership.
+export async function liveSessionIds(presencePath: string, directory: string): Promise<string[]> {
+  const announcements = await liveAnnouncements(presencePath, DEFAULT_STALE_AFTER_MS);
+  const ids = await Promise.all(announcements.map(async (entry) =>
+    await realpath(entry.directory).catch(() => undefined) === directory ? entry.sessionIds : []));
+  return [...new Set(ids.flat())].slice(0, 2048);
+}
+
+function validSessionId(id: unknown): id is string {
+  return typeof id === "string" && /^[a-zA-Z0-9_-]{1,256}$/u.test(id);
+}
+
+async function liveAnnouncements(presencePath: string, staleAfterMs: number):
+    Promise<{ directory: string; sessionIds: string[] }[]> {
   let names: string[];
   try {
     names = await readdir(presencePath);
   } catch {
     return [];
   }
-  const found = new Set<string>();
-  for (const name of names) {
+  const found: { directory: string; sessionIds: string[] }[] = [];
+  for (const name of names.sort().slice(0, 256)) {
     if (!name.endsWith(".json")) continue;
     const file = path.join(presencePath, name);
     try {
       const info = await stat(file);
+      if (!info.isFile() || info.size > 32_768) continue;
       if (Date.now() - info.mtimeMs > staleAfterMs) {
         if (Date.now() - info.mtimeMs > staleAfterMs * 12) await rm(file, { force: true });
         continue;
@@ -85,12 +107,14 @@ export async function liveDirectories(
       if ((value as { version?: unknown } | null)?.version !== 1 || typeof directory !== "string") continue;
       // eslint-disable-next-line no-control-regex -- deliberately rejects C0 control characters in paths
       if (!path.isAbsolute(directory) || directory.length > MAX_PATH_LENGTH || /[\x00-\x1f]/u.test(directory)) continue;
-      found.add(directory);
+      const ids = (value as { sessionIds?: unknown }).sessionIds;
+      const sessionIds = Array.isArray(ids) && ids.length <= 64 && ids.every(validSessionId) ? ids : [];
+      found.push({ directory, sessionIds });
     } catch {
       // A file removed or half-written between listing and reading is simply not live.
     }
   }
-  return [...found].sort().slice(0, MAX_DIRECTORIES);
+  return found;
 }
 
 export function resolvePresencePath(environment: NodeJS.ProcessEnv = process.env): string {

@@ -87,6 +87,22 @@ Directories are set up automatically. Each running instance announces its own di
 
 The app's **Open project by path** only opens a directory that is currently available this way.
 
+### Sessions that change directory
+
+OpenCode can move a chat while the agent works. An already authorized chat keeps
+its original mobile project/session handle: streaming, history, prompts and
+permission replies continue without restarting OpenCode or editing
+`projectDirectories`. Moved chats remain discoverable under the original project.
+The plugin always reads the current location from OpenCode; following a chat does
+not authorize other chats or project access in its destination folder.
+
+Locally open TUI tabs are also announced privately to the connection holder, so
+it can recover a moved chat from another running TUI. These announcements contain
+only bounded session IDs and the launch directory, never conversation content.
+After a full plugin teardown, recovery is limited to exact-directory chats and
+locally open TUI sessions; arbitrary old mobile IDs do not grant access. See
+[moved-session continuity](docs/adr/0016-moved-session-continuity.md).
+
 ## Revoking remote access
 
 `/remote` uses OpenCode's own dialogs, and the **⊙ Remote** indicator sits in its footer status

@@ -94,11 +94,21 @@ test("an OpenCode TUI connector serves encrypted chat operations through the rel
     OPENCODE_REMOTE_TRUSTED_CLIENT_IDENTITY: JSON.stringify(client.identity.publicIdentity),
   })
   const toasts = []
+  const eventTasks = []
+  const localTabs = []
   cleanup = await setupConnector({
     options: {}, location: { directory: workspace }, client: opencode,
-    data: { location: { default: () => ({ directory: workspace }) } },
-    ui: { toast: { show: (toast) => toasts.push(toast) } },
+    data: { location: { default: () => ({ directory: workspace }) }, listen: (handler) => {
+      const controller = new AbortController()
+      eventTasks.push((async () => {
+        try { for await (const details of opencode.event.subscribe({ signal: controller.signal })) handler({ details }) }
+        catch (error) { if (!controller.signal.aborted) throw error }
+      })())
+      return () => controller.abort()
+    } },
+    ui: { toast: { show: (toast) => toasts.push(toast) }, tabs: { list: () => localTabs } },
   })
+  t.after(() => Promise.all(eventTasks))
 
   const connection = await Promise.race([hello, new Promise((_, reject) =>
     setTimeout(() => reject(new Error("Timed out waiting for connector hello")), 10_000))])
@@ -427,6 +437,54 @@ test("an OpenCode TUI connector serves encrypted chat operations through the rel
   assert.equal(toolPart.activity.kind, "read")
   assert.equal(toolPart.activity.state, "completed")
 
+  // A native session move must not invalidate the phone's project/session handle, stream,
+  // history cursor or control operations, nor authorize unrelated destination chats.
+  const destination = path.join(root, "moved-workspace"); await mkdir(destination)
+  const movedBody = { version: 1, projectId, sessionId: imported.id }
+  const beforeMove = await call("chat.snapshot", movedBody)
+  const moveUpdates = []
+  const moveListener = (data) => { void decryptRelayEnvelope({ recipient: client.identity, sender: message.identity,
+    envelope: JSON.parse(data.toString()), epoch }).then((payload) => {
+      if (payload.kind === "event" && payload.operation === "chat.stream.updated") moveUpdates.push(payload.body)
+    }, () => {}) }
+  connection.socket.on("message", moveListener)
+  const moveSubscriptionId = crypto.randomUUID()
+  await call("chat.stream.subscribe", { ...movedBody, subscriptionId: moveSubscriptionId })
+  await opencode.session.move({ sessionID: imported.id, directory: destination })
+  const moveDeadline = Date.now() + 10_000
+  while ((await opencode.session.get({ sessionID: imported.id })).location.directory !== destination) {
+    assert.ok(Date.now() < moveDeadline, "Timed out waiting for the native session move")
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  await opencode.session.update({ sessionID: imported.id, title: "Moved live" })
+  while (!moveUpdates.some((update) => update.snapshot.chat.title === "Moved live")) {
+    assert.ok(Date.now() < moveDeadline, "The existing encrypted stream stopped after moving the chat")
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  connection.socket.off("message", moveListener)
+  await call("chat.stream.unsubscribe", { ...movedBody, subscriptionId: moveSubscriptionId })
+  assert.equal((await call("chat.get", movedBody)).body.chat.id, imported.id)
+  assert.equal((await call("chat.snapshot", { ...movedBody, cursor: beforeMove.body.cursor })).kind, "response")
+  assert.ok((await call("chat.list", { version: 1, projectId })).body.chats.some((chat) => chat.id === imported.id))
+  assert.deepEqual((await call("chat.abort", movedBody)).body, { version: 1, accepted: true })
+  const foreign = await opencode.session.create({ location: { directory: destination } })
+  assert.equal((await call("chat.get", { ...movedBody, sessionId: foreign.id })).body.code, "access_denied")
+  assert.equal((await call("project.open", { version: 1, path: destination })).body.code, "access_denied")
+
+  // A chat already moved before the connection holder saw it is recoverable only through a
+  // local TUI tab announcement, not knowledge of a session ID from the phone.
+  localTabs.push({ sessionID: foreign.id })
+  assert.ok((await call("chat.list", { version: 1, projectId })).body.chats.some((chat) => chat.id === foreign.id))
+  localTabs.length = 0
+  const movedFork = await call("chat.fork", movedBody)
+  assert.equal(movedFork.kind, "response", JSON.stringify(movedFork.body))
+  assert.equal((await opencode.session.get({ sessionID: movedFork.body.chat.id })).location.directory, destination)
+  assert.deepEqual((await call("chat.delete", { ...movedBody, sessionId: movedFork.body.chat.id })).body,
+    { version: 1, deleted: true })
+  assert.deepEqual((await call("chat.prompt", { ...movedBody, text: "continue in the moved directory" })).body,
+    { version: 1, accepted: true })
+  assert.equal((await opencode.session.get({ sessionID: imported.id })).location.directory, destination)
+
   // Build/Plan: OpenCode's prompt carries no agent, so the connector switches the session's agent first.
   // Verified on the real server by the switch OpenCode itself records in the chat's history. Run
   // last, on a chat of its own, because the prompt starts a real turn.
@@ -468,6 +526,28 @@ test("an OpenCode TUI connector serves encrypted chat operations through the rel
   } else {
     t.diagnostic("chat.models listed no model; model selection was not exercised against the real server")
   }
+
+  // A moved chat must be visible immediately, even when native directory history exceeds
+  // one page. A reduced first native limit must not skip entries when paging at 50 again.
+  const nativeIds = []
+  for (let i = 0; i < 11; i++) {
+    nativeIds.push(...(await Promise.all(Array.from({ length: 5 }, () =>
+      opencode.session.create({ location: { directory: workspace } })))).map((session) => session.id))
+  }
+  const movedFirst = await call("chat.list", { version: 1, projectId })
+  assert.ok(movedFirst.body.chats.some((chat) => chat.id === imported.id), "the moved chat must remain on page one")
+  const listedIds = new Set(movedFirst.body.chats.map((chat) => chat.id))
+  let listCursor = movedFirst.body.cursor
+  for (let pages = 0; listCursor; pages++) {
+    assert.ok(pages < 10, "native/moved pagination must terminate")
+    const next = await call("chat.list", { version: 1, projectId, cursor: listCursor })
+    for (const chat of next.body.chats) {
+      assert.equal(listedIds.has(chat.id), false, "native continuation must not duplicate a chat")
+      listedIds.add(chat.id)
+    }
+    listCursor = next.body.cursor
+  }
+  assert.ok(nativeIds.every((id) => listedIds.has(id)), "every native session survives reduced-page continuation")
 
   // Pairing is skipped on the development relay path, so nothing was shown to the user.
   assert.deepEqual(toasts, [])

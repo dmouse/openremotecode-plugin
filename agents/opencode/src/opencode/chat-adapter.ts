@@ -11,6 +11,7 @@ import { openCodeEvents } from "./event-source.js";
 import { buildModels, modelEffortLevels } from "./models.js";
 import { fetchPendingQuestion, replyToQuestion } from "./questions.js";
 import { buildSnapshot } from "./snapshot.js";
+import { SessionContinuity } from "./session-continuity.js";
 
 // Events fatal to the whole connection, not just one session.
 const FATAL_EVENT = "location.shutdown";
@@ -67,6 +68,8 @@ const page = z.object({
   cursor: z.object({ next: z.string().max(16_000).nullish() }),
 });
 const active = z.record(z.string(), z.object({ type: z.string() }).loose());
+const listCursor = z.object({ exhausted: z.boolean().optional(), native: z.string().optional(),
+  remaining: z.array(z.string()).max(2048).optional() });
 
 export function toChatSummary(value: z.infer<typeof session>) {
   return chatSummarySchema.parse({
@@ -86,10 +89,27 @@ export class OpenCodeChatAdapter implements ChatAdapter, ChatStreamReader {
   readonly #registry: WorkspaceRegistry;
   readonly #cursors = new CursorStore();
   readonly #answeredQuestions = new AnsweredQuestionMemory();
+  readonly #continuity = new SessionContinuity();
+  readonly #localSessions: ((workspace: Workspace) => readonly string[] | Promise<readonly string[]>) | undefined;
 
-  constructor(client: OpenCodeClient, directory: string, additionalDirectories: unknown = [], registry?: WorkspaceRegistry) {
+  constructor(client: OpenCodeClient, directory: string, additionalDirectories: unknown = [], registry?: WorkspaceRegistry,
+      localSessions?: (workspace: Workspace) => readonly string[] | Promise<readonly string[]>) {
     this.#client = client;
     this.#registry = registry ?? new WorkspaceRegistry(directory, additionalDirectories);
+    this.#localSessions = localSessions;
+  }
+
+  /// Local host events only schedule authoritative re-reads. Unknown event IDs grant nothing.
+  observeEvent(event: { type: string; data?: Record<string, unknown> }): void {
+    if (event.type === "session.moved") {
+      const id = eventSessionId(event);
+      if (id) this.#continuity.moved(id);
+    }
+    if (event.type === "server.connected") this.#continuity.moved();
+    if (event.type === "session.deleted") {
+      const id = eventSessionId(event);
+      if (id) this.#continuity.forget(id);
+    }
   }
 
   async execute(operation: ChatOperation, body: Record<string, unknown>, cancellation?: AbortSignal): Promise<unknown> {
@@ -112,52 +132,60 @@ export class OpenCodeChatAdapter implements ChatAdapter, ChatStreamReader {
     const options = (): RequestOptions => ({ signal: deadline });
     if (operation === "chat.models") return buildModels(this.#client, workspace.path, options().signal);
     if (operation === "chat.list") {
-      const cursor = this.#cursors.resolve(body, workspace.id);
-      const result = page.parse(await this.#client.session.list({ directory: workspace.path, parentID: null,
-        limit: PAGE_SIZE, ...(cursor ? { cursor } : {}) }, options()));
-      // The server filters by directory, but the boundary is enforced here too: a session outside
-      // this workspace must never reach the phone because a filter was ignored.
-      for (const entry of result.data) await this.#assertInWorkspace(entry, workspace);
-      // OpenCode hands back a `next` cursor even on the last page, so a short page is what ends the list.
-      const more = result.data.length >= PAGE_SIZE ? result.cursor.next ?? null : null;
-      return { version: 1, chats: result.data.filter((s) => !s.parentID).map(toChatSummary),
-        cursor: this.#cursors.issue(more, workspace.id) };
+      return this.#list(workspace, body, deadline);
     }
     if (operation === "chat.create") {
+      this.#continuity.ensureRoom();
       const created = await this.#client.session.create({ location: { directory: workspace.path } }, options());
-      const owned = await this.#owned(workspace, session.pick({ id: true }).parse(created).id);
-      return { version: 1, chat: toChatSummary(owned) };
+      try {
+        const owned = await this.#owned(workspace, session.pick({ id: true }).parse(created).id, deadline);
+        return { version: 1, chat: toChatSummary(owned) };
+      } catch {
+        // Creation already ran; even a concurrent capacity/authorization change is uncertain,
+        // not a definitive refusal that could invite an automatic duplicate create.
+        throw new Error("Created chat could not be confirmed");
+      }
     }
 
     const sessionId = String(body.sessionId);
-    const owned = await this.#owned(workspace, sessionId, options().signal);
+    let parentWorkspace = workspace;
+    if (operation === "chat.subtask.snapshot") {
+      const parent = await this.#owned(workspace, String(body.parentSessionId), deadline);
+      if (parent.parentID) throw new ChatAccessError("access_denied");
+      parentWorkspace = await this.#continuity.authorize(parent, workspace);
+    }
+    const owned = await this.#owned(parentWorkspace, sessionId, options().signal);
+    const currentWorkspace = await this.#continuity.authorize(owned, parentWorkspace);
     if (operation === "chat.subtask.snapshot") {
       const parentSessionId = String(body.parentSessionId);
       // A subtask is reachable only through its own claimed parent, never as an independent chat.
       if (owned.parentID !== parentSessionId) throw new ChatAccessError("access_denied");
       const snapshot = chatRequests["chat.subtask.snapshot"].parse(body);
       const signal = this.#deadline(cancellation);
-      return buildSnapshot({ client: this.#client, cursors: this.#cursors, workspace, chat: toChatSummary(owned),
+      return buildSnapshot({ client: this.#client, cursors: this.#cursors, workspace: currentWorkspace, chat: toChatSummary(owned),
         sessionId, body: snapshot, signal, operation, answeredQuestions: this.#answeredQuestions.get(sessionId),
         recheck: async () => {
           await this.#registry.get(workspace.id);
-          if ((await this.#owned(workspace, sessionId, signal)).parentID !== parentSessionId) throw new ChatAccessError("access_denied");
+          const parent = await this.#owned(workspace, parentSessionId, signal);
+          const current = await this.#continuity.authorize(parent, workspace);
+          if ((await this.#owned(current, sessionId, signal)).parentID !== parentSessionId) throw new ChatAccessError("access_denied");
         } });
     }
     // Subtask sessions are reachable only through their parent's snapshot, never directly.
     if (owned.parentID) throw new ChatAccessError("access_denied");
 
     if (operation === "chat.fork" || operation === "chat.delete") {
-      const descendants = operation === "chat.delete" ? await this.#deleteTree(workspace, sessionId, deadline) : undefined;
+      const descendants = operation === "chat.delete" ? await this.#deleteTree(currentWorkspace, sessionId, deadline) : undefined;
       const tree = descendants ? [...descendants.keys()] : [sessionId];
       const running = active.parse(await this.#client.session.active(options()));
       if (tree.some((id) => running[id])) throw new ChatAccessError("chat_busy");
       for (const id of tree) {
-        const checked = await this.#owned(workspace, id, deadline);
+        const checked = await this.#owned(id === sessionId ? workspace : currentWorkspace, id, deadline);
         if (descendants && checked.parentID !== descendants.get(id)) throw new ChatAccessError("access_denied");
       }
       await this.#registry.get(workspace.id);
       if (operation === "chat.fork") {
+        this.#continuity.ensureRoom();
         let result: unknown;
         try {
           result = await this.#client.session.fork({ sessionID: sessionId }, options());
@@ -176,12 +204,14 @@ export class OpenCodeChatAdapter implements ChatAdapter, ChatStreamReader {
           if (fork.id === sessionId || fork.parentID || fork.fork?.sessionID !== sessionId) {
             throw new Error("Fork identity could not be confirmed");
           }
-          await this.#assertInWorkspace(fork, workspace);
-          const confirmed = await this.#owned(workspace, fork.id, deadline);
-          if (confirmed.parentID || confirmed.fork?.sessionID !== sessionId) {
+          await this.#assertInWorkspace(fork, currentWorkspace);
+          const confirmed = session.parse(await this.#client.session.get({ sessionID: fork.id }, options()));
+          if (confirmed.id !== fork.id || confirmed.parentID || confirmed.fork?.sessionID !== sessionId) {
             throw new Error("Fork identity could not be confirmed");
           }
+          await this.#assertInWorkspace(confirmed, currentWorkspace);
           await this.#registry.get(workspace.id);
+          this.#continuity.remember(confirmed, currentWorkspace);
           return { version: 1, chat: toChatSummary(confirmed) };
         } catch {
           // The native mutation may already have happened. Even an authorization
@@ -205,6 +235,7 @@ export class OpenCodeChatAdapter implements ChatAdapter, ChatStreamReader {
       } catch {
         throw new Error("Deletion could not be confirmed");
       }
+      for (const id of tree) this.#continuity.forget(id);
       return { version: 1, deleted: true };
     }
 
@@ -212,7 +243,7 @@ export class OpenCodeChatAdapter implements ChatAdapter, ChatStreamReader {
     if (operation === "chat.snapshot") {
       const snapshot = chatRequests["chat.snapshot"].parse(body);
       const signal = this.#deadline(cancellation);
-      return buildSnapshot({ client: this.#client, cursors: this.#cursors, workspace, chat: toChatSummary(owned),
+      return buildSnapshot({ client: this.#client, cursors: this.#cursors, workspace: currentWorkspace, chat: toChatSummary(owned),
         sessionId, body: snapshot, signal, operation, answeredQuestions: this.#answeredQuestions.get(sessionId), recheck: async () => {
           await this.#registry.get(workspace.id);
           if ((await this.#owned(workspace, sessionId, signal)).parentID) throw new ChatAccessError("access_denied");
@@ -256,7 +287,7 @@ export class OpenCodeChatAdapter implements ChatAdapter, ChatStreamReader {
       // listed means the client's list is stale, and nothing has been sent: context_expired, not
       // an uncertain outcome.
       if (switchModel) {
-        const levels = await modelEffortLevels(this.#client, workspace.path, model.providerID, model.modelID, options().signal);
+        const levels = await modelEffortLevels(this.#client, currentWorkspace.path, model.providerID, model.modelID, options().signal);
         if (levels === undefined || (model.effort !== undefined && !levels.includes(model.effort))) {
           throw new ChatAccessError("context_expired");
         }
@@ -290,6 +321,7 @@ export class OpenCodeChatAdapter implements ChatAdapter, ChatStreamReader {
     signal.throwIfAborted();
     for await (const event of openCodeEvents(this.#client, signal)) {
       if (signal.aborted) return;
+      this.observeEvent(event);
       // Unblocks the caller's initial read.
       if (event.type === "server.connected") { changed(false); continue; }
       if (event.type === FATAL_EVENT) throw new Error("Chat source disposed");
@@ -353,7 +385,8 @@ export class OpenCodeChatAdapter implements ChatAdapter, ChatStreamReader {
     return parents;
   }
 
-  async #owned(workspace: Workspace, sessionId: string, signal = AbortSignal.timeout(DEADLINE_MS)): Promise<z.infer<typeof session>> {
+  async #owned(workspace: Workspace, sessionId: string, signal = AbortSignal.timeout(DEADLINE_MS), locallyOpen = false):
+      Promise<z.infer<typeof session>> {
     let raw: unknown;
     try {
       raw = await this.#client.session.get({ sessionID: sessionId }, { signal });
@@ -367,8 +400,54 @@ export class OpenCodeChatAdapter implements ChatAdapter, ChatStreamReader {
     const found = session.parse(raw);
     // Session-by-ID lookups are not scoped to a directory, so membership is checked here.
     if (found.id !== sessionId) throw new ChatAccessError("access_denied");
-    await this.#assertInWorkspace(found, workspace);
+    const canAdopt = locallyOpen || !this.#continuity.knows(sessionId, workspace) &&
+      (await this.#localSessions?.(workspace))?.includes(sessionId);
+    await this.#continuity.authorize(found, workspace, canAdopt);
     return found;
+  }
+
+  async #list(workspace: Workspace, body: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
+    // Only locally open TUI tabs can seed a session that already moved before this adapter
+    // started. A server-wide session cache is deliberately not a source of authorization.
+    const localIds = new Set(await this.#localSessions?.(workspace) ?? []);
+    const cursor = this.#cursors.resolve(body, workspace.id);
+    const state = cursor ? listCursor.parse(JSON.parse(cursor)) : {};
+    const entries: z.infer<typeof session>[] = [];
+    const remaining = [...state.remaining ?? new Set([...localIds, ...this.#continuity.candidates(workspace)])];
+    if (remaining.length > 2048) throw new ChatAccessError("context_expired");
+    // Bound lookahead as well as returned chats. A reconnect can mark every known chat dirty;
+    // an opaque continuation advances even when these chats turn out not to have moved.
+    let checked = 0;
+    while (remaining.length && entries.length < PAGE_SIZE && checked++ < PAGE_SIZE) {
+      const id = remaining.shift();
+      if (!id) break;
+      try {
+        const entry = await this.#owned(workspace, id, signal, localIds.has(id));
+        const current = await this.#continuity.authorize(entry, workspace);
+        if (!entry.parentID && current.path !== workspace.path) entries.push(entry);
+      } catch (error) {
+        if (!(error instanceof ChatAccessError) || error.code !== "chat_not_found") throw error;
+        this.#continuity.forget(id);
+      }
+    }
+    const limit = PAGE_SIZE - entries.length;
+    let exhausted = state.exhausted ?? false;
+    let native = state.native;
+    if (limit > 0 && !exhausted) {
+      const result = page.parse(await this.#client.session.list({ directory: workspace.path, parentID: null,
+        limit, ...(native ? { cursor: native } : {}) }, { signal }));
+      if (result.data.length > limit) throw new ChatAccessError("context_expired");
+      // Initial directory discovery remains strict, even if OpenCode ignores its filter.
+      for (const entry of result.data) await this.#assertInWorkspace(entry, workspace);
+      for (const entry of result.data) this.#continuity.remember(entry, workspace);
+      entries.push(...result.data.filter((entry) => !entry.parentID));
+      // OpenCode returns a next cursor on its last page too: a short page ends the list.
+      native = result.cursor.next ?? undefined;
+      exhausted = result.data.length < limit || !native;
+    }
+    const next = remaining.length || !exhausted ? JSON.stringify({ remaining, native, exhausted }) : null;
+    return { version: 1, chats: entries.map(toChatSummary),
+      cursor: this.#cursors.issue(next, workspace.id) };
   }
 
   async #assertInWorkspace(entry: z.infer<typeof session>, workspace: Workspace): Promise<void> {

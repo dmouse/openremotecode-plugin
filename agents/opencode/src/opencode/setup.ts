@@ -1,6 +1,7 @@
+import { realpath } from "node:fs/promises";
 import { startConnector, type ConnectorNotification } from "../connector.js";
 import { WorkspaceRegistry } from "../chat/workspace.js";
-import { announceDirectory, liveDirectories, resolvePresencePath } from "../directory-presence.js";
+import { announceDirectory, liveDirectories, liveSessionIds, resolvePresencePath } from "../directory-presence.js";
 import { OpenCodeChatAdapter } from "./chat-adapter.js";
 import type { OpenCodeClient } from "./client.js";
 import { OpenCodeMcpReader } from "./mcp.js";
@@ -27,11 +28,17 @@ export interface TuiContext {
   readonly options: Readonly<Record<string, unknown>>
   readonly location: { readonly directory: string } | undefined
   readonly client: OpenCodeClient
-  readonly data: { readonly location: { default(): { readonly directory: string } } }
+  readonly data: {
+    readonly location: { default(): { readonly directory: string } }
+    readonly session?: { root(sessionID: string): string }
+    readonly listen?: (handler: (event: { details: { type: string; data?: Record<string, unknown> } }) => void) => () => void
+  }
   /// Registers commands, including slash and palette entries. Optional because a host that does
   /// not offer it must still get a working connector, only without `/remote`.
   readonly keymap?: { layer(input: () => { mode?: string; commands?: readonly KeymapCommand[] }): void }
   readonly ui: DialogUI & {
+    readonly router?: { current(): { type: string; sessionID?: string } }
+    readonly tabs?: { list(): readonly { sessionID: string }[] }
     readonly toast: { show(options: {
       title?: string; message: string; variant?: "info" | "success" | "warning" | "error"; duration?: number
     }): void }
@@ -58,7 +65,9 @@ export interface KeymapCommand {
 /// sink, so diagnostics below error level are dropped and errors surface once as a toast; the
 /// connector's logging rules already forbid sensitive content in every message it emits.
 export async function setupConnector(context: TuiContext): Promise<() => Promise<void>> {
-  const directory = (context.location ?? context.data.location.default()).directory;
+  // The TUI's default is its launch directory, while context.location follows the selected
+  // session. Keep the launch project's handles stable even if setup runs after a session move.
+  const directory = context.data.location.default().directory;
   const options = { ...context.options };
   const reported = new Set<string>();
   // Registered before the connector starts, and independently of whether it does: `/remote`
@@ -84,8 +93,21 @@ export async function setupConnector(context: TuiContext): Promise<() => Promise
   }
   // Announced whether or not this instance ends up holding the connection: the holder serves
   // every announced directory, so an instance on standby is still reachable from the app.
+  const canonical = await realpath(directory);
+  const localSessionIds = (): string[] => {
+    const route = context.ui.router?.current();
+    const ids = [...context.ui.tabs?.list().map((tab) => tab.sessionID) ?? [],
+      ...(route?.type === "session" && route.sessionID ? [route.sessionID] : [])];
+    return [...new Set(ids.slice(0, 64).map((id) => context.data.session?.root(id) ?? id))];
+  };
   const presencePath = resolvePresencePath();
-  const presence = announceDirectory({ presencePath, directory });
+  const registry = new WorkspaceRegistry(directory, options.projectDirectories, () => liveDirectories(presencePath));
+  const chats = new OpenCodeChatAdapter(context.client, directory, options.projectDirectories, registry, async (workspace) => {
+    return [...new Set([...(workspace.path === canonical ? localSessionIds() : []),
+      ...await liveSessionIds(presencePath, workspace.path)])];
+  });
+  const presence = announceDirectory({ presencePath, directory, sessionIds: localSessionIds });
+  const stopEvents = context.data.listen?.(({ details }) => { chats.observeEvent(details); });
   const connector = await startConnector({
     options,
     log: (level, message) => {
@@ -104,8 +126,6 @@ export async function setupConnector(context: TuiContext): Promise<() => Promise
     // and fails closed rather than completing without consent.
     confirm: (question) => context.ui.dialog.confirm(question),
     adapters: () => {
-      const registry = new WorkspaceRegistry(directory, options.projectDirectories, () => liveDirectories(presencePath));
-      const chats = new OpenCodeChatAdapter(context.client, directory, options.projectDirectories, registry);
       return { sessions: new OpenCodeSessionReader(context.client, directory), chats,
         mcp: new OpenCodeMcpReader(context.client, registry), stream: chats };
     },
@@ -114,6 +134,7 @@ export async function setupConnector(context: TuiContext): Promise<() => Promise
     dialogs.abort();
     releaseCommand();
     releaseChip();
+    stopEvents?.();
     await presence.stop();
     await connector.dispose?.();
   };

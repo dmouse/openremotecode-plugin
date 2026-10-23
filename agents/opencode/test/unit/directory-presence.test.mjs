@@ -5,7 +5,7 @@ import path from "node:path"
 import { setTimeout as delay } from "node:timers/promises"
 import test from "node:test"
 
-import { announceDirectory, liveDirectories } from "../../dist/directory-presence.js"
+import { announceDirectory, liveDirectories, liveSessionIds } from "../../dist/directory-presence.js"
 import { WorkspaceRegistry } from "../../dist/chat/workspace.js"
 
 async function withRoot(run) {
@@ -84,5 +84,40 @@ test("without discovery the registry serves only its own directory", async () =>
     await mkdir(own)
     const registry = new WorkspaceRegistry(own)
     assert.deepEqual((await registry.list()).map((entry) => entry.path), [own])
+  })
+})
+
+test("local TUI session announcements follow tab changes, are directory-scoped, and expire", async () => {
+  await withRoot(async (root) => {
+    const presence = path.join(root, "directories")
+    const own = path.join(root, "own"); await mkdir(own)
+    const other = path.join(root, "other"); await mkdir(other)
+    let ids = ["ses_a"]
+    const a = announceDirectory({ presencePath: presence, directory: own, heartbeatMs: 20, sessionIds: () => ids })
+    const b = announceDirectory({ presencePath: presence, directory: other, heartbeatMs: 20, sessionIds: () => ["ses_foreign"] })
+    try {
+      await until(async () => (await liveSessionIds(presence, own)).includes("ses_a"), "open session should be announced")
+      ids = ["ses_b", "ses_b"]
+      await until(async () => (await liveSessionIds(presence, own)).join() === "ses_b", "tab changes should be announced")
+      assert.deepEqual(await liveSessionIds(presence, other), ["ses_foreign"])
+    } finally {
+      await a.stop(); await b.stop()
+    }
+    assert.deepEqual(await liveSessionIds(presence, own), [])
+  })
+})
+
+test("hostile session announcements cannot grant arbitrary IDs or resurrect stale sessions", async () => {
+  await withRoot(async (root) => {
+    const presence = path.join(root, "directories"); await mkdir(presence)
+    for (const [name, ids] of [["invalid", ["ses_ok", "../outside"]], ["oversize", Array(65).fill("ses_ok")],
+      ["wrong-type", "ses_ok"], ["stale", ["ses_stale"]]]) {
+      const file = path.join(presence, `${name}.json`)
+      await writeFile(file, JSON.stringify({ version: 1, directory: root, sessionIds: ids }))
+      if (name === "stale") {
+        const old = new Date(Date.now() - 60_000); await utimes(file, old, old)
+      }
+    }
+    assert.deepEqual(await liveSessionIds(presence, root), [])
   })
 })
