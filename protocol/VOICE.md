@@ -58,8 +58,14 @@ for stopping an active recording remain reachable during cleanup. Later successf
 checks restore the buttons without restarting either app. A status result from a
 previous connection or foreground lifetime must not restore availability.
 
-The microphone beside Send starts a quick note; Stop finalizes it and appends its
-text to the existing draft. It never submits a prompt. The Call action in the
+The microphone beside Send starts a note; Stop finalizes it and opens a playable
+preview, without changing the existing text draft or submitting a prompt. Only
+the preview's explicit Send submits its locally obtained transcript through the
+ordinary encrypted `chat.prompt` path. Mobile adds the versioned text marker
+documented in [mobile ADR 0006](../../mobile/docs/adr/0006-voice-note-presentation.md)
+to correlate the authoritative text message with temporary device-local audio;
+this does not change the voice request/response schemas. Transcribe reveals that
+message's transcript inline and never resubmits it. The Call action in the
 header explicitly opts into automatic sending. A new chat is created first if
 needed so a call stays bound to a stable session. Replies remain text.
 
@@ -74,14 +80,19 @@ state, not Hex's partial transcript events.
 
 Capture continues during transcription/submission with at most five seconds of
 queued PCM in memory. Overflow stops recording instead of dropping words. A long
-60-second turn is added to the draft for review, never split into automatic
-prompts. Idle call streams rotate after 30 seconds of silence. Mute discards the
-unfinished utterance and prevents audio transmission; unmute starts a new stream.
+60-second call turn is added to the draft for review, never split into automatic
+prompts; a 60-second note opens its preview. Idle call streams rotate after 30
+seconds of silence. Mute discards the unfinished utterance and prevents audio
+transmission; unmute starts a new stream.
 Hangup, navigation, backgrounding, microphone interruption, changed peer identity,
 disconnect, or a pending permission/question stops the voice session. Calls never
 answer permissions or questions. Uncertain prompt submission stops the call and
 keeps the text for review without automatic retry. The existing prompt journal
 and authoritative snapshot reconciliation still govern OpenCode submissions.
 
-Audio is never written to disk. No server-side voice endpoint, public local port,
-cloud speech API, background recording service, or durable transcript store is added.
+Audio is never written to disk. Mobile retains up to eight bounded notes in
+account/connector/project/session-scoped workspace memory for explicit playback.
+Restart or eviction leaves an honest audio-unavailable bubble with its transcript,
+not a promise of synchronized audio history. No server-side voice endpoint, public
+local port, cloud speech API, background recording service, or durable transcript
+store is added.
