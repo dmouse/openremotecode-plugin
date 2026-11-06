@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { voiceRequests, voiceResponses } from '../dist/index.js'
+import { chatRequests, chatResponses, voiceRequests, voiceResponses } from '../dist/index.js'
 
 const fixture = JSON.parse(await readFile(new URL('./fixtures/voice-v1.json', import.meta.url), 'utf8'))
 test('voice contract fixes audio format, size, ordering and explicit operations', () => {
@@ -23,4 +23,17 @@ test('voice contract fixes audio format, size, ordering and explicit operations'
   assert.deepEqual(voiceResponses['voice.status'].parse(fixture.unavailable), fixture.unavailable)
   assert.equal(voiceResponses['voice.status'].safeParse({ version: 1, available: 'true' }).success, false)
   assert.equal(voiceResponses['voice.status'].safeParse({ ...fixture.available, token: 'secret' }).success, false)
+})
+
+test('voice-origin metadata round-trips as ordinary encrypted chat text without audio', async () => {
+  const note = JSON.parse(await readFile(new URL('./fixtures/voice-note-v2.json', import.meta.url), 'utf8'))
+  const request = { version: 1, projectId: fixture.start.projectId, sessionId: 'session_voice', text: note.prompt }
+  assert.deepEqual(chatRequests['chat.prompt'].parse(request), request)
+  const snapshot = {
+    version: 1, chat: { id: 'session_voice', title: 'Voice chat', updatedAt: 1 },
+    messages: [{ id: 'voice_message', role: 'user', text: note.prompt, truncated: false }],
+    status: 'idle', cursor: null,
+  }
+  assert.deepEqual(chatResponses['chat.snapshot'].parse(snapshot), snapshot)
+  assert.equal(chatRequests['chat.prompt'].safeParse({ ...request, audio: 'AAAA' }).success, false)
 })

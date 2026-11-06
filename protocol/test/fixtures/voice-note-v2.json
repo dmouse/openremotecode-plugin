@@ -1,0 +1,19 @@
+{
+  "id": "11111111-1111-4111-8111-111111111111",
+  "durationMs": 18000,
+  "transcript": "Review the current changes.\nExplain what needs attention.",
+  "prompt": "[Open Remote Code voice note v2: 11111111-1111-4111-8111-111111111111; durationMs=18000]\nReview the current changes.\nExplain what needs attention.",
+  "legacyPrompt": "[Open Remote Code voice note v1: 11111111-1111-4111-8111-111111111111]\nReview the current changes.\nExplain what needs attention.",
+  "invalidPrompts": [
+    "Ordinary text",
+    "[Open Remote Code voice note v2: ------------------------------------; durationMs=1000]\nHello",
+    "[Open Remote Code voice note v3: 11111111-1111-4111-8111-111111111111; durationMs=1000]\nHello",
+    "[Open Remote Code voice note v2: 11111111-1111-4111-8111-111111111111]\nHello",
+    "[Open Remote Code voice note v1: 11111111-1111-4111-8111-111111111111; durationMs=1000]\nHello",
+    "[Open Remote Code voice note v2: 11111111-1111-4111-8111-111111111111; durationMs=0]\nHello",
+    "[Open Remote Code voice note v2: 11111111-1111-4111-8111-111111111111; durationMs=-1000]\nHello",
+    "[Open Remote Code voice note v2: 11111111-1111-4111-8111-111111111111; durationMs=60001]\nHello",
+    "[Open Remote Code voice note v2: 11111111-1111-4111-8111-111111111111; durationMs=01000]\nHello",
+    "[Open Remote Code voice note v2: 11111111-1111-4111-8111-111111111111; durationMs=1000]\n  "
+  ]
+}
