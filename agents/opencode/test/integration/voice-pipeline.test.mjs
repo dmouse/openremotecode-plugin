@@ -9,6 +9,7 @@ import { HexVoiceEngine } from '../../dist/voice/hex-engine.js'
 
 test('encrypted voice to Hex HTTP to text to the normal OpenCode prompt path', async (t) => {
   const fixture = JSON.parse(await readFile(new URL('../../../../protocol/test/fixtures/voice-v1.json', import.meta.url), 'utf8'))
+  const note = JSON.parse(await readFile(new URL('../../../../protocol/test/fixtures/voice-note-v2.json', import.meta.url), 'utf8'))
   const token = 'hex_synthetic_test_token', ownerToken = 'hex_synthetic_stream_token'
   const routes = [], prompts = []
   const server = createServer(async (request, response) => {
@@ -36,7 +37,7 @@ test('encrypted voice to Hex HTTP to text to the normal OpenCode prompt path', a
       assert.deepEqual(body, Buffer.alloc(2))
       response.writeHead(204).end()
     } else if (request.url === '/streams/1/finish') {
-      response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ text: fixture.transcript.text }))
+      response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ text: note.transcript }))
     } else { response.writeHead(404).end() }
   })
   server.listen(0, '127.0.0.1')
@@ -60,8 +61,10 @@ test('encrypted voice to Hex HTTP to text to the normal OpenCode prompt path', a
     const frame = await encryptRelayPayload({ sender: client, recipient: connector.publicIdentity, epoch, sequence: sequence++,
       payload: { protocolVersion: 2, kind: 'request', requestId, sentAt: Date.now(), operation, body } })
     assert.equal(JSON.stringify(frame).includes(token), false)
+    assert.equal(JSON.stringify(frame).includes(note.transcript), false)
+    assert.equal(JSON.stringify(frame).includes('Open Remote Code voice note'), false)
     const result = await dispatcher.handle(frame)
-    assert.equal(JSON.stringify(result).includes(fixture.transcript.text), false)
+    assert.equal(JSON.stringify(result).includes(note.transcript), false)
     return decryptRelayEnvelope({ recipient: client, sender: connector.publicIdentity, envelope: result, epoch })
   }
   assert.deepEqual((await request('voice.status', fixture.status)).body, fixture.available)
@@ -69,9 +72,12 @@ test('encrypted voice to Hex HTTP to text to the normal OpenCode prompt path', a
   assert.deepEqual((await request('voice.start', fixture.start)).body, fixture.ready)
   await request('voice.audio', fixture.audio)
   const result = await request('voice.finish', fixture.finish)
-  assert.deepEqual(result.body, fixture.transcript)
+  assert.deepEqual(result.body, { ...fixture.transcript, text: note.transcript })
   assert.equal(prompts.length, 0) // A quick note has no authority to execute a prompt.
-  const body = { version: 1, projectId: fixture.start.projectId, sessionId: fixture.start.sessionId, text: result.body.text }
+  // Mobile retains only duration and text, not a playable recording. The exact
+  // shared marker survives the normal encrypted, authorized, deduplicated path.
+  assert.equal(note.prompt, `[Open Remote Code voice note v2: ${note.id}; durationMs=${note.durationMs}]\n${result.body.text}`)
+  const body = { version: 1, projectId: fixture.start.projectId, sessionId: fixture.start.sessionId, text: note.prompt }
   const requestId = crypto.randomUUID()
   await request('chat.prompt', body, requestId)
   await request('chat.prompt', body, requestId)
