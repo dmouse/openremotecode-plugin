@@ -50,7 +50,10 @@ Both a user's own attachment and an assistant/tool-produced image (for
 example a `mobile-mcp` screenshot tool result) arrive this way — the
 plugin does not need to know which produced it. The plugin only accepts a
 `FilePart` whose `mime` is `image/png`, `image/jpeg`, or `image/webp` **and**
-whose `url` is an inline `data:<mime>;base64,...` URI matching that mime. A
+whose `url` is an inline `data:<mime>;base64,...` URI matching that mime. The
+decoded bytes must also have the matching PNG, JPEG, or WebP file signature
+before any native decoder is invoked. SVG and other formats are rejected even
+when mislabeled as an allowed raster format. A
 filesystem path, `file://` reference, or remote URL is never fetched or
 followed — if the part isn't already carrying its bytes inline, it is treated
 exactly like any other non-image file (`[File: filename]` for a user message,
@@ -92,13 +95,18 @@ preview crosses the boundary.
   durable offline copy" position.
 - **Hostile content / resource exhaustion:** the plugin only ever decodes
   bytes already resident in the part it was handed (never a fetched path or
-  URL), rejects any non-allowlisted mime up front, and bounds declared
+  URL), rejects any non-allowlisted mime or mismatched file signature before
+  invoking a native decoder, fails closed on decoder warnings, and bounds declared
   dimensions before allocating a decode buffer to block a decompression-bomb
   style payload. A decode failure drops the image rather than crashing or
   retrying. The existing 100-part, 48,000-unit message, ten-message page,
   200-retained-message mobile, and relay frame limits all still apply
   unchanged — this capability introduces no new size ceiling anywhere in the
   pipeline, only a small new consumer of the existing one.
+  Decoder dependencies must remain patched. Header checks narrow decoder
+  selection; they do not replace the decoder's full validation or its security
+  updates. Restrictions are local to this adapter, not process-wide sharp loader
+  settings that could interfere with other plugins in the same OpenCode host.
 - **Integrity of re-encoding:** the output is always a freshly re-encoded
   JPEG from decoded pixels, never a copy of input bytes, which is also why no
   embedded metadata from the original file can survive into the preview.
@@ -113,7 +121,8 @@ transcoding) and a user-sent JPEG photo alongside an unrelated non-image
 file attachment (proving the existing `[File: filename]` fallback is
 unaffected). Protocol tests cover strict field validation, the relaxed
 user-role `parts` invariant, and budget interaction. Plugin tests cover mime
-allowlisting, non-data-URL rejection, the resize ladder landing under budget,
+allowlisting (including SVGs disguised as rasters and mismatched raster formats),
+non-data-URL rejection, the resize ladder landing under budget,
 decode-failure fallback, and metadata stripping, plus an isolated native
 OpenCode integration case proving the encrypted opt-in snapshot carries a
 real attachment end-to-end.

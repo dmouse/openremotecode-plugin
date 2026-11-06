@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
+import sharp from "sharp"
 import { chatMessageContent, resolveImages } from "../../dist/chat-message.js"
 
 const images = JSON.parse(await readFile(new URL("../../../../protocol/test/fixtures/chat-image-v1.json", import.meta.url), "utf8"))
@@ -33,6 +34,40 @@ test("only an inline, mime-matched, allowlisted data URL is ever decoded; nothin
   assert.equal(resolved.size, 0)
 })
 
+test("SVG and other unsupported bytes cannot bypass the decoder allowlist with raster MIME labels", async () => {
+  const unsupported = [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1" fill="red"/></svg>',
+    '<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>',
+    'GIF89a',
+    '%PDF-1.7',
+    '',
+  ]
+  for (const mime of ["image/png", "image/jpeg", "image/webp"]) {
+    for (const source of unsupported) {
+      const parts = [{ id: "unsupported", type: "file", filename: "attachment", mime,
+        url: `data:${mime};base64,${Buffer.from(source).toString("base64")}` }]
+      assert.equal((await resolveImages(parts)).size, 0, `unsupported input claimed as ${mime}`)
+    }
+  }
+})
+
+test("real PNG, JPEG and WebP bytes require the matching MIME and remain bounded JPEG previews", async () => {
+  const formats = [["png", "image/png"], ["jpeg", "image/jpeg"], ["webp", "image/webp"]]
+  for (const [format, actualMime] of formats) {
+    const input = await sharp({ create: { width: 2, height: 2, channels: 3, background: "red" } })
+      .toFormat(format).toBuffer()
+    for (const [, claimedMime] of formats) {
+      const resolved = await resolveImages([{ id: "raster", type: "file", mime: claimedMime,
+        url: `data:${claimedMime};base64,${input.toString("base64")}` }])
+      assert.equal(resolved.has("raster"), actualMime === claimedMime, `${actualMime} claimed as ${claimedMime}`)
+      if (actualMime === claimedMime) {
+        assert.equal(resolved.get("raster").mime, "image/jpeg")
+        assert.ok(resolved.get("raster").data.length <= 34000)
+      }
+    }
+  }
+})
+
 test("a corrupt or empty inline payload fails closed to today's label/exclusion fallback", async () => {
   const corrupt = [{ id: "bad", type: "file", filename: "broken.png", mime: "image/png",
     url: "data:image/png;base64,AAAA" }]
@@ -40,6 +75,11 @@ test("a corrupt or empty inline payload fails closed to today's label/exclusion 
   assert.equal(resolved.has("bad"), false)
   assert.deepEqual(chatMessageContent("user", corrupt), { text: "[File: broken.png]\n", truncated: false })
   assert.deepEqual(chatMessageContent("assistant", corrupt), { text: "", truncated: false })
+  for (const [mime, hex] of [["image/png", "89504e470d0a1a0a"], ["image/jpeg", "ffd8ff"],
+    ["image/webp", "524946460000000057454250"]]) {
+    assert.equal((await resolveImages([{ id: "header-only", type: "file", mime,
+      url: `data:${mime};base64,${Buffer.from(hex, "hex").toString("base64")}` }])).size, 0)
+  }
 })
 
 test("chatMessageContent presents an already-resolved image for either role and excludes it from message.text", async () => {

@@ -14,6 +14,20 @@ const IMAGE_URL_PATTERN = /^data:(image\/png|image\/jpeg|image\/webp);base64,([A
 // that fits the shared IMAGE_DATA_MAX budget. Never the original file.
 const IMAGE_RESIZE_LADDER: readonly (readonly [number, number])[] = [[720, 70], [480, 60], [320, 45]];
 const IMAGE_MAX_PIXELS = 8000 * 8000;
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const JPEG_SIGNATURE = Buffer.from([0xff, 0xd8, 0xff]);
+const RIFF_SIGNATURE = Buffer.from("RIFF");
+const WEBP_SIGNATURE = Buffer.from("WEBP");
+
+// Check the bytes before invoking any native decoder. Claimed MIME types alone
+// must not let an SVG (or another unsupported format) select a different loader.
+// Keep this local: sharp.block() would affect other plugins in the host process.
+function matchesImageMime(input: Buffer, mime: string): boolean {
+  if (mime === "image/png") return input.subarray(0, 8).equals(PNG_SIGNATURE);
+  if (mime === "image/jpeg") return input.subarray(0, 3).equals(JPEG_SIGNATURE);
+  return mime === "image/webp" && input.subarray(0, 4).equals(RIFF_SIGNATURE) &&
+    input.subarray(8, 12).equals(WEBP_SIGNATURE);
+}
 
 // Decode/resize/re-encode only bytes already inline on the part (never a
 // fetched path or URL) into a small JPEG preview. Re-encoding from decoded
@@ -34,9 +48,10 @@ async function imageAttachment(part: FilePart): Promise<ChatImage | undefined> {
   } catch {
     return undefined;
   }
+  if (!matchesImageMime(input, part.mime)) return undefined;
   try {
     for (const [edge, quality] of IMAGE_RESIZE_LADDER) {
-      const { data, info } = await sharp(input, { limitInputPixels: IMAGE_MAX_PIXELS, failOn: "none" })
+      const { data, info } = await sharp(input, { limitInputPixels: IMAGE_MAX_PIXELS, failOn: "warning" })
         .rotate() // apply EXIF orientation before it is discarded below
         .resize(edge, edge, { fit: "inside", withoutEnlargement: true })
         .jpeg({ quality, mozjpeg: true })
