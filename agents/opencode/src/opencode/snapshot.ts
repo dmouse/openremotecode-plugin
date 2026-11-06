@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { utf16Length } from "@openremotecode/protocol";
 import { chatMessageContent, permissionSummary, questionSummary, resolveImages } from "../chat-message.js";
 import { ChatAccessError, ChatUnsupportedError } from "../chat/access-error.js";
 import type { AnsweredQuestionBatch } from "../chat-message.js";
@@ -24,11 +25,11 @@ const CHAT_TYPES = new Set(["user", "assistant"]);
 
 const page = z.object({
   data: z.array(z.object({ type: z.string() }).loose()).max(PAGE_SIZE),
-  cursor: z.object({ next: z.string().max(16_000).nullish() }).loose(),
+  cursor: z.object({ next: z.string().check(utf16Length(0, 16_000)).nullish() }).loose(),
 });
 const active = z.record(z.string(), z.object({ type: z.string() }).loose());
 const permissions = z.array(z.object({
-  id: z.string().min(1).max(128), sessionID: z.string(), action: z.string(), resources: z.array(z.string()).max(64),
+  id: z.string().check(utf16Length(1, 128)), sessionID: z.string(), action: z.string(), resources: z.array(z.string()).max(64),
 }).loose()).max(64);
 
 /// Maps an entry in OpenCode's own active-session map to the product status. Only an absent entry

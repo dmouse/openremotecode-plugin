@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { sanitizeQuestionPrompt, type AnsweredQuestionBatch } from "../chat-message.js";
-import type { ChatQuestion } from "@openremotecode/protocol";
+import { utf16Length, type ChatQuestion } from "@openremotecode/protocol";
 import { ChatAccessError } from "../chat/access-error.js";
 import type { OpenCodeClient, RequestOptions } from "./client.js";
 
@@ -13,10 +13,10 @@ import type { OpenCodeClient, RequestOptions } from "./client.js";
 // a bounded string, each with a fixed option list, none hidden or conditional. A form with any
 // field outside that shape is not a trust decision to make -- it is simply never surfaced as a
 // question, exactly like an unrecognized permission or tool.
-const option = z.object({ value: z.string().min(1).max(4096), label: z.string().min(1).max(4096),
-  description: z.string().max(4096).optional() }).loose();
+const option = z.object({ value: z.string().check(utf16Length(1, 4096)), label: z.string().check(utf16Length(1, 4096)),
+  description: z.string().check(utf16Length(0, 4096)).optional() }).loose();
 const field = z.object({
-  key: z.string().min(1).max(128),
+  key: z.string().check(utf16Length(1, 128)),
   type: z.enum(["string", "number", "integer", "boolean", "multiselect", "external"]),
   title: z.string().optional(),
   hidden: z.boolean().optional(),
@@ -25,7 +25,7 @@ const field = z.object({
   maxItems: z.number().optional(),
   custom: z.boolean().optional(),
 }).loose();
-const form = z.object({ id: z.string().min(1).max(128), sessionID: z.string(),
+const form = z.object({ id: z.string().check(utf16Length(1, 128)), sessionID: z.string(),
   fields: z.array(field).min(1).max(8) }).loose();
 const formList = z.array(form).max(64);
 

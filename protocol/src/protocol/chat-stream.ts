@@ -1,7 +1,8 @@
 import { z } from "zod";
+import { utf16Length } from "./utf16.js";
 import { chatResponses } from "./chat.js";
-const target = { version: z.literal(1), projectId: z.uuid(), sessionId: z.string().min(1).max(128),
-  parentSessionId: z.string().min(1).max(128).optional(), subscriptionId: z.uuid() };
+const target = { version: z.literal(1), projectId: z.uuid(), sessionId: z.string().check(utf16Length(1, 128)),
+  parentSessionId: z.string().check(utf16Length(1, 128)).optional(), subscriptionId: z.uuid() };
 export const chatStreamRequests = {
   "chat.stream.subscribe": z.object({ ...target, includeTools: z.boolean().optional(), includeShell: z.boolean().optional(),
     includeCode: z.boolean().optional(),

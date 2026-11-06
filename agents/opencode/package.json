@@ -58,8 +58,8 @@
   },
   "dependencies": {
     "@openremotecode/protocol": "workspace:*",
-    "sharp": "^0.35.4",
-    "zod": "4.1.8"
+    "sharp": "^0.35.5",
+    "zod": "4.6.7"
   },
   "peerDependencies": {
     "@opentui/solid": ">=0.4.5"

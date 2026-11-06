@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { utf16Length } from "./utf16.js";
 import { decodeBase64Url } from "./base64url.js";
 
 export const VOICE_VERSION = 1 as const;
@@ -17,7 +18,7 @@ const audio = z.string().min(3).max(21334).regex(/^[A-Za-z0-9_-]+$/u)
 
 export const voiceRequests = {
   "voice.status": z.object(version).strict(),
-  "voice.start": z.object({ ...target, projectId: z.uuid(), sessionId: z.string().min(1).max(128).optional() }).strict(),
+  "voice.start": z.object({ ...target, projectId: z.uuid(), sessionId: z.string().check(utf16Length(1, 128)).optional() }).strict(),
   "voice.audio": z.object({ ...target, sequence: z.number().int().min(0).max(5999), audio }).strict(),
   "voice.finish": z.object(target).strict(),
   "voice.cancel": z.object(target).strict(),
@@ -27,7 +28,7 @@ export const voiceResponses = {
   "voice.start": z.object({ ...target, sampleRate: z.literal(16000), sampleFormat: z.literal("s16le"),
     maxChunkBytes: z.literal(VOICE_CHUNK_BYTES), maxDurationMs: z.literal(60000) }).strict(),
   "voice.audio": z.object({ ...target, sequence: z.number().int().min(0).max(5999) }).strict(),
-  "voice.finish": z.object({ ...target, text: z.string().max(32000) }).strict(),
+  "voice.finish": z.object({ ...target, text: z.string().check(utf16Length(0, 32000)) }).strict(),
   "voice.cancel": z.object({ ...target, cancelled: z.literal(true) }).strict(),
 } as const;
 export const VOICE_CAPABILITIES = Object.keys(voiceRequests);

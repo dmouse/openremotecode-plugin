@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { utf16Length } from "./utf16.js";
 
 import { connectorPublicIdentitySchema } from "../crypto/connector-identity.js";
 import { RELAY_PROTOCOL_VERSION } from "./constants.js";
@@ -8,10 +9,10 @@ export const connectorHelloSchema = z
   .object({
     protocolVersion: z.literal(RELAY_PROTOCOL_VERSION),
     type: z.literal("connector.hello"),
-    pluginVersion: z.string().min(1).max(32),
+    pluginVersion: z.string().check(utf16Length(1, 32)),
     identity: connectorPublicIdentitySchema,
     nonce: relayNonceSchema,
-    capabilities: z.array(z.string().min(1).max(64)).max(64),
+    capabilities: z.array(z.string().check(utf16Length(1, 64))).max(64),
   })
   .strict();
 

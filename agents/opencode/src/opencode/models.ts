@@ -1,20 +1,20 @@
 import { z } from "zod";
-import { modelSummarySchema } from "@openremotecode/protocol";
+import { modelSummarySchema, utf16Length } from "@openremotecode/protocol";
 import type { OpenCodeClient, RequestOptions } from "./client.js";
 
 const MAX_MODELS = 200;
 const MAX_PROVIDERS = 20;
 const MAX_EFFORT_LEVELS = 10;
-const id = z.string().min(1).max(128);
+const id = z.string().check(utf16Length(1, 128));
 
 const model = z.object({
-  id, modelID: z.string().min(1), providerID: id, name: z.string().min(1).max(256),
+  id, modelID: z.string().min(1), providerID: id, name: z.string().check(utf16Length(1, 256)),
   variants: z.array(z.object({ id: z.string() }).loose()).max(64).optional(),
 }).loose();
 // Bounded generously against a corrupted local response; the exposed list is separately
 // capped at MAX_MODELS below.
 const modelList = z.object({ data: z.array(model).max(2_000) });
-const provider = z.object({ id, name: z.string().min(1).max(256) }).loose();
+const provider = z.object({ id, name: z.string().check(utf16Length(1, 256)) }).loose();
 
 function effortLevels(variants: readonly { id: string }[] | undefined): string[] {
   if (!variants) return [];

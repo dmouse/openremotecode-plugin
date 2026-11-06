@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { utf16Length } from "@openremotecode/protocol";
 import type { Part } from "./message-parts.js";
 
 export interface HistoryMessage { info: { id: string; sessionID: string; role: "user" | "assistant"; time?: { created?: number; completed?: number };
   modelID?: string; providerID?: string; variant?: string; agent?: string; mode?: string }; parts: Part[] }
-const id = z.string().min(1).max(128);
+const id = z.string().check(utf16Length(1, 128));
 const time = z.number().int().nonnegative();
 const messageSchema = z.object({ id, type: z.enum(["user", "assistant", "shell", "synthetic", "system", "compaction", "agent-switched", "model-switched"]),
   time: z.object({ created: time, completed: time.optional() }) }).loose();
@@ -69,7 +70,7 @@ function convert(message: z.infer<typeof messageSchema>, sessionID: string): His
         const derived = Array.isArray(state.content) ? state.content.filter((p: any) => p.type === "text" && typeof p.text === "string")
           .slice(0, 100).map((p: any) => p.text.slice(0, 48001)).join("\n").slice(0, 48001) : undefined;
         const output = derived ?? (typeof rawMetadata.output === "string" ? rawMetadata.output : "");
-        parts.push({ ...part("tool", content.id), type: "tool", tool: z.string().max(256).parse(content.name), callID: content.id,
+        parts.push({ ...part("tool", content.id), type: "tool", tool: z.string().check(utf16Length(0, 256)).parse(content.name), callID: content.id,
           state: { status, input, output, error: typeof state.error?.message === "string" ? state.error.message : "",
             metadata: { ...rawMetadata, ...(derived !== undefined ? { output: derived } : {}) },
             time: { start: content.time?.ran ?? content.time?.created, end: content.time?.completed }, title: "" } } as Part);

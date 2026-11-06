@@ -1,7 +1,7 @@
 import { realpath } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import { chatRequests, chatSummarySchema, type ChatOperation, type ChatStreamTarget, type VoiceTarget } from "@openremotecode/protocol";
+import { chatRequests, chatSummarySchema, utf16Length, type ChatOperation, type ChatStreamTarget, type VoiceTarget } from "@openremotecode/protocol";
 import { ChatAccessError, ChatUnsupportedError, type ChatAdapter } from "../chat-adapter.js";
 import { AnsweredQuestionMemory } from "../chat/answered-questions.js";
 import type { ChatStreamReader } from "../chat-stream.js";
@@ -53,20 +53,20 @@ function eventSessionId(event: { data?: Record<string, unknown> }): string | und
 }
 
 const session = z.object({
-  id: z.string().min(1).max(256),
+  id: z.string().check(utf16Length(1, 256)),
   title: z.string().optional(),
-  parentID: z.string().min(1).max(256).optional(),
-  fork: z.object({ sessionID: z.string().min(1).max(256) }).loose().optional(),
+  parentID: z.string().check(utf16Length(1, 256)).optional(),
+  fork: z.object({ sessionID: z.string().check(utf16Length(1, 256)) }).loose().optional(),
   // The session's current agent and model, when the server reports them. Read only to avoid a
   // redundant switch.
-  agent: z.string().max(128).optional(),
+  agent: z.string().check(utf16Length(0, 128)).optional(),
   model: z.object({ id: z.string(), providerID: z.string(), variant: z.string().optional() }).loose().optional(),
   time: z.object({ updated: z.number().int().nonnegative() }),
   location: z.object({ directory: z.string().min(1) }),
 });
 const page = z.object({
   data: z.array(session).max(PAGE_SIZE),
-  cursor: z.object({ next: z.string().max(16_000).nullish() }),
+  cursor: z.object({ next: z.string().check(utf16Length(0, 16_000)).nullish() }),
 });
 const active = z.record(z.string(), z.object({ type: z.string() }).loose());
 const listCursor = z.object({ exhausted: z.boolean().optional(), native: z.string().optional(),

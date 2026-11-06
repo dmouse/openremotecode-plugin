@@ -3,11 +3,12 @@ import { constants } from "node:fs";
 import { chmod, mkdir, open, opendir, realpath, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
+import { utf16Length } from "@openremotecode/protocol";
 import { resolveConnectorAuthorizationPath } from "./auth/authorization-store.js";
 
 const MAX_FOLDERS = 100;
 // eslint-disable-next-line no-control-regex -- local paths are untrusted too
-const directoryPath = z.string().min(1).max(4096).refine((value) => path.isAbsolute(value) && !/[\x00-\x1f]/u.test(value));
+const directoryPath = z.string().check(utf16Length(1, 4096)).refine((value) => path.isAbsolute(value) && !/[\x00-\x1f]/u.test(value));
 const folderSchema = z.object({
   version: z.literal(1),
   path: directoryPath,

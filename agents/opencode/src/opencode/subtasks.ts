@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import { z } from "zod";
-import type { ChatSubtask } from "@openremotecode/protocol";
+import { utf16Length, type ChatSubtask } from "@openremotecode/protocol";
 import { subtaskSummary } from "../chat-message.js";
 import { subtaskStats } from "../chat-subtask.js";
 import { ChatAccessError } from "../chat/access-error.js";
@@ -18,7 +18,7 @@ const CHAT_TYPES = new Set(["user", "assistant"]);
 const childSession = z.object({ id: z.string().min(1), parentID: z.string().optional(),
   location: z.object({ directory: z.string().min(1) }) }).loose();
 const messagePage = z.object({ data: z.array(z.object({ type: z.string() }).loose()).max(MAX_MESSAGES),
-  cursor: z.object({ next: z.string().max(16_000).nullish() }).loose() });
+  cursor: z.object({ next: z.string().check(utf16Length(0, 16_000)).nullish() }).loose() });
 
 async function getChildSession(client: OpenCodeClient, workspace: Workspace, parentId: string, id: string,
     signal: AbortSignal): Promise<z.infer<typeof childSession>> {

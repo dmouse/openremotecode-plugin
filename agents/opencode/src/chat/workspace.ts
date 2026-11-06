@@ -1,6 +1,7 @@
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
+import { utf16Length } from "@openremotecode/protocol";
 import { ChatAccessError } from "./access-error.js";
 
 export interface Workspace { id: string; name: string; path: string; dev: number; ino: number }
@@ -38,7 +39,7 @@ export class WorkspaceRegistry {
   /// every listing. Production supplies only persistent local approvals; passing
   /// no default directory permits an empty-by-default registry.
   constructor(directory: string | undefined, additionalDirectories: unknown = [], discover?: () => Promise<WorkspaceDirectory[]>) {
-    const additional = z.array(z.string().min(1).max(4096)).max(99).parse(additionalDirectories);
+    const additional = z.array(z.string().check(utf16Length(1, 4096))).max(99).parse(additionalDirectories);
     this.#directories = [...new Set([...(directory ? [directory] : []), ...additional])];
     this.#discover = discover;
     // eslint-disable-next-line no-control-regex -- deliberately rejects C0 control characters in paths

@@ -1,10 +1,11 @@
 import { z } from "zod";
+import { utf16Length } from "./utf16.js";
 import { activitySchema } from "./activity.js";
 
 export const CHAT_VERSION = 1 as const;
 // Base64 preview budget: ~34,000 units decodes to ~25.5KB of re-encoded JPEG.
 export const IMAGE_DATA_MAX = 34000;
-const id = z.string().min(1).max(128);
+const id = z.string().check(utf16Length(1, 128));
 const version = { version: z.literal(CHAT_VERSION) };
 const project = { ...version, projectId: z.uuid() };
 const session = { ...project, sessionId: id };
@@ -16,12 +17,12 @@ const promptModel = z.object({ providerID: id, modelID: id, effort: id.optional(
 // typed. See chatQuestionSchema and CHAT-QUESTIONS.md.
 const chatQuestionAnswerSchema = z.union([
   z.object({ selected: z.array(z.number().int().nonnegative().max(31)).min(1).max(32) }).strict(),
-  z.object({ text: z.string().trim().min(1).max(2000) }).strict(),
+  z.object({ text: z.string().trim().check(utf16Length(1, 2000)) }).strict(),
 ]);
 export type ChatQuestionAnswer = z.infer<typeof chatQuestionAnswerSchema>
 export const chatRequests = {
   "project.list": z.object(version).strict(),
-  "project.open": z.object({ ...version, path: z.string().min(1).max(4096) }).strict(),
+  "project.open": z.object({ ...version, path: z.string().check(utf16Length(1, 4096)) }).strict(),
   "chat.list": z.object({ ...project, cursor: z.uuid().optional() }).strict(),
   "chat.snapshot": z.object({ ...session, cursor: z.uuid().optional(), includeSubtasks: z.boolean().optional(),
     includeTools: z.boolean().optional(), includeShell: z.boolean().optional(), includeCode: z.boolean().optional(), includeActivities: z.boolean().optional(),
@@ -37,11 +38,11 @@ export const chatRequests = {
     .refine((body) => (body.includeShell !== true && body.includeCode !== true) || body.includeTools === true),
   "chat.create": z.object(project).strict(),
   "chat.get": z.object(session).strict(),
-  "chat.rename": z.object({ ...session, title: z.string().trim().min(1).max(512) }).strict(),
+  "chat.rename": z.object({ ...session, title: z.string().trim().check(utf16Length(1, 512)) }).strict(),
   "chat.fork": z.object(session).strict(),
   "chat.delete": z.object(session).strict(),
   "chat.models": z.object(project).strict(),
-  "chat.prompt": z.object({ ...session, text: z.string().min(1).max(32000),
+  "chat.prompt": z.object({ ...session, text: z.string().check(utf16Length(1, 32000)),
     mode: z.enum(["build", "plan"]).optional(),
     model: promptModel.optional() }).strict(),
   "chat.abort": z.object(session).strict(),
@@ -65,10 +66,10 @@ export const chatRequests = {
 export const CHAT_CAPABILITIES = [...Object.keys(chatRequests), "chat.prompt.mode", "chat.prompt.model", "chat.tools", "chat.shell", "chat.code", "chat.activities", "chat.images", "chat.permissions", "chat.questions", "chat.todos"];
 export type ChatOperation = keyof typeof chatRequests
 export const projectSummarySchema = z.object({
-  id: z.uuid(), name: z.string().min(1).max(256), path: z.string().min(1).max(4096),
+  id: z.uuid(), name: z.string().check(utf16Length(1, 256)), path: z.string().check(utf16Length(1, 4096)),
 }).strict();
 export const chatSummarySchema = z.object({
-  id, title: z.string().max(512), updatedAt: z.number().int().nonnegative(),
+  id, title: z.string().check(utf16Length(0, 512)), updatedAt: z.number().int().nonnegative(),
   parentId: id.optional(),
 }).strict();
 // A selectable model. `effortLevels` lists that model's own reported
@@ -76,8 +77,8 @@ export const chatSummarySchema = z.object({
 // supports one; absent for models with no variable-effort choice. Ids are
 // whatever OpenCode itself names them, not a fixed set -- see CHAT-MODEL.md.
 export const modelSummarySchema = z.object({
-  providerID: id, providerName: z.string().min(1).max(256),
-  modelID: id, modelName: z.string().min(1).max(256),
+  providerID: id, providerName: z.string().check(utf16Length(1, 256)),
+  modelID: id, modelName: z.string().check(utf16Length(1, 256)),
   effortLevels: z.array(id).min(1).max(10).optional(),
 }).strict();
 export type ChatModelSummary = z.infer<typeof modelSummarySchema>
@@ -89,25 +90,25 @@ const reasoningTime = z.object({
 // the same presentation taxonomy a tool call does, not a parallel one.
 const operation = z.enum(["read", "edit", "write", "search", "list", "execute", "fetch", "tool", "question"]);
 export const chatMessagePartSchema = z.discriminatedUnion("type", [
-  z.object({ id, type: z.literal("text"), text: z.string().max(48000) }).strict(),
-  z.object({ id, type: z.literal("reasoning"), text: z.string().max(48000),
+  z.object({ id, type: z.literal("text"), text: z.string().check(utf16Length(0, 48000)) }).strict(),
+  z.object({ id, type: z.literal("reasoning"), text: z.string().check(utf16Length(0, 48000)),
     time: reasoningTime.optional(), activity: activitySchema.optional() }).strict(),
-  z.object({ id, type: z.literal("tool"), text: z.string().max(48000), activity: activitySchema.optional(),
+  z.object({ id, type: z.literal("tool"), text: z.string().check(utf16Length(0, 48000)), activity: activitySchema.optional(),
     tool: z.object({
       operation,
-      description: z.string().min(1).max(256).optional(),
+      description: z.string().check(utf16Length(1, 256)).optional(),
       status: z.enum(["pending", "running", "completed", "error", "unknown"]),
       durationMs: z.number().int().nonnegative().optional(),
-      shell: z.object({ command: z.string().max(8000), output: z.string().max(32000),
+      shell: z.object({ command: z.string().check(utf16Length(0, 8000)), output: z.string().check(utf16Length(0, 32000)),
         truncated: z.boolean() }).strict().optional(),
-      code: z.object({ source: z.string().max(8000), output: z.string().max(32000),
+      code: z.object({ source: z.string().check(utf16Length(0, 8000)), output: z.string().check(utf16Length(0, 32000)),
         truncated: z.boolean() }).strict().optional(),
     }).strict().refine((tool) => ((!tool.shell && !tool.code) || tool.operation === "execute") &&
       !(tool.shell && tool.code)),
   }).strict(),
-  z.object({ id, type: z.literal("subtask"), text: z.string().max(48000), activity: activitySchema.optional(),
+  z.object({ id, type: z.literal("subtask"), text: z.string().check(utf16Length(0, 48000)), activity: activitySchema.optional(),
     task: z.object({
-      title: z.string().min(1).max(512), agent: z.string().min(1).max(64),
+      title: z.string().check(utf16Length(1, 512)), agent: z.string().check(utf16Length(1, 64)),
       status: z.enum(["pending", "running", "retry", "completed", "error", "unknown"]),
       background: z.boolean(), sessionId: id.optional(),
       stats: z.object({ toolCalls: z.number().int().min(0).max(5000),
@@ -134,8 +135,8 @@ export type ChatImage = Extract<ChatMessagePart, { type: "image" }>["image"]
 // presentation already used for tools) crosses the boundary -- never raw
 // native metadata. See CHAT-PERMISSIONS.md.
 export const chatPermissionSchema = z.object({
-  id, operation, description: z.string().min(1).max(256),
-  pattern: z.string().min(1).max(256).optional(),
+  id, operation, description: z.string().check(utf16Length(1, 256)),
+  pattern: z.string().check(utf16Length(1, 256)).optional(),
 }).strict();
 export type ChatPermission = z.infer<typeof chatPermissionSchema>
 // A pending question batch OpenCode is blocked on. OpenCode's own `question` tool can
@@ -145,13 +146,13 @@ export type ChatPermission = z.infer<typeof chatPermissionSchema>
 // caps and sanitization are what make rendering agent-authored text safe on a phone.
 // See CHAT-QUESTIONS.md.
 export const chatQuestionOptionSchema = z.object({
-  label: z.string().min(1).max(80),
-  description: z.string().max(256).optional(),
+  label: z.string().check(utf16Length(1, 80)),
+  description: z.string().check(utf16Length(0, 256)).optional(),
 }).strict();
 // One question within a batch. Mirrors OpenCode's own per-question shape exactly --
 // see CHAT-QUESTIONS.md.
 export const chatQuestionPromptSchema = z.object({
-  header: z.string().max(64), question: z.string().min(1).max(2000),
+  header: z.string().check(utf16Length(0, 64)), question: z.string().check(utf16Length(1, 2000)),
   options: z.array(chatQuestionOptionSchema).min(1).max(32),
   multiple: z.boolean(),
   // OpenCode's own "custom" flag on the question, defaulting true: whether its TUI (and
@@ -175,12 +176,12 @@ export type ChatQuestion = z.infer<typeof chatQuestionSchema>
 // rule here is a presentation allowlist, not a raw passthrough. An
 // unrecognized native status maps to "pending". See CHAT-TODOS.md.
 export const chatTodoSchema = z.object({
-  id, content: z.string().min(1).max(256),
+  id, content: z.string().check(utf16Length(1, 256)),
   status: z.enum(["pending", "in_progress", "completed", "cancelled"]),
 }).strict();
 export type ChatTodo = z.infer<typeof chatTodoSchema>
 const message = z.object({
-  id, role: z.enum(["user", "assistant"]), text: z.string().max(48000),
+  id, role: z.enum(["user", "assistant"]), text: z.string().check(utf16Length(0, 48000)),
   truncated: z.boolean(),
   incomplete: z.boolean().optional(),
   // The agent the message was generated under, when it was build/plan --

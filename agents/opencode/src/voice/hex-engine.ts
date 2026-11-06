@@ -3,6 +3,7 @@ import { open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { utf16Length } from "@openremotecode/protocol";
 
 export class VoiceError extends Error {
   constructor(readonly code: "voice_unavailable" | "voice_busy" | "voice_expired") { super(code); }
@@ -74,7 +75,7 @@ export class HexVoiceEngine implements VoiceEngine {
         if (!response.ok) { await response.body?.cancel(); throw new VoiceError("voice_unavailable"); }
         return json(response);
       };
-      z.object({ version: z.string().min(1).max(128), apiVersion: z.literal("2") }).parse(await read("/health"));
+      z.object({ version: z.string().check(utf16Length(1, 128)), apiVersion: z.literal("2") }).parse(await read("/health"));
       const capabilities = z.object({ streams: z.boolean() }).parse(await read("/capabilities"));
       abort.throwIfAborted();
       return capabilities.streams;
@@ -117,7 +118,7 @@ export class HexVoiceEngine implements VoiceEngine {
       },
       finish: async (abort) => {
         if (ended) throw new VoiceError("voice_expired");
-        const result = z.object({ text: z.string().max(32000) }).parse(await json(await call(
+        const result = z.object({ text: z.string().check(utf16Length(0, 32000)) }).parse(await json(await call(
           `/streams/${String(stream.id)}/finish`, "", "application/json", abort, stream.ownerToken, 15000)));
         ended = true;
         return result.text.trim();

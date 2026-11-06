@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { utf16Length } from "./utf16.js";
 
 import {
   connectorPublicIdentitySchema,
@@ -21,8 +22,8 @@ export const identityProofSchema = z
 export const pairingTranscriptSchema = z
   .object({
     version: z.literal(1),
-    serviceId: z.string().min(1).max(128),
-    pairingId: z.string().min(20).max(64),
+    serviceId: z.string().check(utf16Length(1, 128)),
+    pairingId: z.string().check(utf16Length(20, 64)),
     connectorIdentity: connectorPublicIdentitySchema,
     deviceIdentity: connectorPublicIdentitySchema,
   })

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { utf16Length } from "./utf16.js";
 
 export const SESSION_LIST_OPERATION = "session.list" as const;
 
@@ -6,9 +7,9 @@ export const sessionListRequestBodySchema = z.object({}).strict();
 
 export const remoteSessionSchema = z
   .object({
-    id: z.string().min(1).max(128),
-    parentId: z.string().min(1).max(128).optional(),
-    title: z.string().max(512),
+    id: z.string().check(utf16Length(1, 128)),
+    parentId: z.string().check(utf16Length(1, 128)).optional(),
+    title: z.string().check(utf16Length(0, 512)),
     createdAt: z.number().int().nonnegative(),
     updatedAt: z.number().int().nonnegative(),
   })
@@ -35,7 +36,7 @@ export const protocolErrorBodySchema = z
       "voice_busy",
       "voice_expired",
     ]),
-    message: z.string().min(1).max(256),
+    message: z.string().check(utf16Length(1, 256)),
   })
   .strict();
 

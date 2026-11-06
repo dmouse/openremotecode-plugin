@@ -1,10 +1,11 @@
 import { z } from "zod";
+import { utf16Length } from "./utf16.js";
 import { relayPayloadSchema } from "./envelope.js";
 
 export const PROJECT_MCP_VERSION = 1 as const;
 export const projectMcpServerSchema = z.object({
   // eslint-disable-next-line no-control-regex -- deliberately rejects C0/C1 control and bidi-override characters
-  name: z.string().min(1).max(128).regex(/^[^\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]+$/u),
+  name: z.string().check(utf16Length(1, 128)).regex(/^[^\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]+$/u),
   status: z.enum(["connected", "disabled", "failed", "needs_auth", "needs_client_registration"]),
 }).strict();
 const project = { version: z.literal(PROJECT_MCP_VERSION), projectId: z.uuid() };
