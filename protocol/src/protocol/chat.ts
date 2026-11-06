@@ -38,6 +38,8 @@ export const chatRequests = {
     .refine((body) => (body.includeShell !== true && body.includeCode !== true) || body.includeTools === true),
   "chat.create": z.object(project).strict(),
   "chat.get": z.object(session).strict(),
+  // Acknowledges only the completion actually displayed, never a future turn.
+  "chat.view": z.object({ ...session, idleAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) }).strict(),
   "chat.rename": z.object({ ...session, title: z.string().trim().check(utf16Length(1, 512)) }).strict(),
   "chat.fork": z.object(session).strict(),
   "chat.delete": z.object(session).strict(),
@@ -71,6 +73,12 @@ export const projectSummarySchema = z.object({
 export const chatSummarySchema = z.object({
   id, title: z.string().check(utf16Length(0, 512)), updatedAt: z.number().int().nonnegative(),
   parentId: id.optional(),
+  activity: z.object({
+    status: z.enum(["idle", "busy", "retry", "unknown"]),
+    idleAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+    viewedAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+    outcome: z.enum(["succeeded", "failed", "interrupted"]).optional(),
+  }).strict().optional(),
 }).strict();
 // A selectable model. `effortLevels` lists that model's own reported
 // reasoning-effort variant ids (OpenCode's `variant` concept) when it
@@ -225,6 +233,7 @@ export const chatResponses = {
   "chat.subtask.snapshot": snapshot,
   "chat.create": z.object({ ...version, chat: chatSummarySchema }).strict(),
   "chat.get": z.object({ ...version, chat: chatSummarySchema }).strict(),
+  "chat.view": z.object({ ...version, accepted: z.literal(true) }).strict(),
   "chat.rename": z.object({ ...version, chat: chatSummarySchema }).strict(),
   "chat.fork": z.object({ ...version, chat: chatSummarySchema }).strict(),
   "chat.delete": z.object({ ...version, deleted: z.literal(true) }).strict(),

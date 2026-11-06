@@ -85,6 +85,8 @@ export { CHAT_VERSION, IMAGE_DATA_MAX, CHAT_CAPABILITIES, chatRequests, chatResp
   type ChatTodo, type ChatOperation, type ChatModelSummary, type ChatQuestionAnswer,
   type ChatQuestion, type ChatQuestionOption, type ChatQuestionPrompt } from "./protocol/chat.js";
 export { activitySchema, ACTIVITY_KINDS, ACTIVITY_STATES, type Activity } from "./protocol/activity.js";
+export { chatListStreamRequests, chatListUpdatedSchema, CHAT_LIST_STREAM_CAPABILITIES,
+  type ChatListTarget, type ChatListUpdate } from "./protocol/chat-list-stream.js";
 export { chatStreamRequests, chatStreamUpdateSchema, chatStreamClosedSchema, CHAT_STREAM_CAPABILITIES,
   type ChatStreamTarget, type ChatStreamUpdate } from "./protocol/chat-stream.js";
 export { PROJECT_MCP_VERSION, PROJECT_MCP_CAPABILITIES, projectMcpRequests, projectMcpResponses,

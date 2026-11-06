@@ -1,0 +1,20 @@
+{
+  "projectId": "11111111-1111-4111-8111-111111111111",
+  "summaries": [
+    {"id":"busy","title":"Working","updatedAt":300,"activity":{"status":"busy","idleAt":100,"viewedAt":100,"outcome":"succeeded"}},
+    {"id":"retry","title":"Retrying","updatedAt":300,"activity":{"status":"retry"}},
+    {"id":"unread","title":"Finished","updatedAt":300,"activity":{"status":"idle","idleAt":300,"viewedAt":100,"outcome":"succeeded"}},
+    {"id":"read","title":"Viewed","updatedAt":300,"activity":{"status":"idle","idleAt":300,"viewedAt":300,"outcome":"succeeded"}},
+    {"id":"failed","title":"Failed","updatedAt":300,"activity":{"status":"idle","idleAt":300,"outcome":"failed"}},
+    {"id":"stopped","title":"Stopped","updatedAt":300,"activity":{"status":"idle","idleAt":300,"outcome":"interrupted"}},
+    {"id":"legacy","title":"Older connector","updatedAt":300}
+  ],
+  "unread": [false,false,true,false,false,false,false],
+  "working": [true,true,false,false,false,false,false],
+  "invalidActivity": [
+    {"status":"completed"}, {"status":"idle","idleAt":-1},
+    {"status":"idle","viewedAt":null}, {"status":"busy","idleAt":1.5},
+    {"status":"idle","outcome":"maybe"}, {"status":"idle","private":"secret"}
+  ],
+  "view": {"version":1,"projectId":"11111111-1111-4111-8111-111111111111","sessionId":"unread","idleAt":300}
+}
