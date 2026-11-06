@@ -25,7 +25,7 @@ import { configuredServiceOrigin, validateLocalRelayURL } from "./service-origin
 import { monitorAuthorization } from "./auth/authorization-monitor.js";
 import { HexVoiceEngine } from "./voice/hex-engine.js";
 
-const PLUGIN_VERSION = "0.4.1";
+const PLUGIN_VERSION = "0.5.0";
 const RELAY_URL_ENVIRONMENT_VARIABLE = "OPENCODE_REMOTE_RELAY_URL";
 const TRUSTED_CLIENT_ENVIRONMENT_VARIABLE = "OPENCODE_REMOTE_TRUSTED_CLIENT_IDENTITY";
 
