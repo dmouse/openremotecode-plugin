@@ -81,7 +81,7 @@ function displayPath(value: unknown, directory?: string) {
 // falls back to "tool", never a native name copied through verbatim.
 const toolOperations: Record<string, ChatTool["operation"]> = { read: "read", edit: "edit", write: "write",
   patch: "edit", grep: "search", glob: "search", list: "list", bash: "execute", shell: "execute",
-  webfetch: "fetch", question: "question" };
+  webfetch: "fetch", question: "question", execute: "execute" };
 
 // Patch input is a diff, not a file read. Extract only a declared filename from
 // its header; never copy hunk lines or other patch text into a presentation field.
@@ -128,7 +128,7 @@ const PERMISSION_DESCRIPTIONS: Record<string, string> = {
 function toolSummary(part: ToolPart, directory?: string, answeredQuestions: readonly AnsweredQuestionBatch[] = []): ChatTool {
   const operation = Object.hasOwn(toolOperations, part.tool) ? toolOperations[part.tool]! : "tool";
   let description = "";
-  // Never forward arbitrary tool input, command strings, URLs, outputs or errors.
+  // Summaries never forward arbitrary input, command/code strings, URLs, outputs or errors.
   // Native tool state can omit `input` despite its non-optional type.
   if (part.tool === "patch") {
     description = patchPath(part.state.input?.patchText, directory) || "Patch";
@@ -139,7 +139,11 @@ function toolSummary(part: ToolPart, directory?: string, answeredQuestions: read
     const location = displayPath(part.state.input?.path, directory).slice(0, 80);
     description = [pattern ? `"${pattern}"` : "", location ? `in ${location}` : ""].filter(Boolean).join(" ");
   } else if (part.tool === "bash" || part.tool === "shell") description = displayText(part.state.input?.description);
-  else if (operation === "fetch") description = fetchHost(part.state.input?.url) || "Fetch web content";
+  else if (part.tool === "execute") description = "Run code";
+  else if (part.tool === "skill") {
+    const name = displayText(part.state.input?.name ?? part.state.input?.id, 240);
+    description = name ? `Load skill: ${name}` : "Load skill";
+  } else if (operation === "fetch") description = fetchHost(part.state.input?.url) || "Fetch web content";
   else if (operation === "question") {
     // The tool's own declared input schema, already trusted and sanitized the same way
     // the live pending banner is (see ADR 0011) -- never the tool's native output/metadata.
@@ -281,11 +285,11 @@ export function permissionSummary(permission: PermissionRequest): ChatPermission
   /* eslint-enable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/no-non-null-assertion */
 }
 
-// Only presentation fields cross this boundary. Shell command/output is an
-// explicit opt-in exception; other native metadata and tool output stay local.
+// Only presentation fields cross this boundary. Shell and code execution details
+// are explicit opt-in exceptions; other native metadata and tool output stay local.
 // Synthetic text includes OpenCode's expanded attachment context, not user prose.
 export function chatMessageContent(role: string, nativeParts: Part[], subtasks?: ReadonlyMap<string, ChatSubtask>,
-  options: { includeTools?: boolean; includeShell?: boolean; includeActivities?: boolean; messageFinished?: boolean;
+  options: { includeTools?: boolean; includeShell?: boolean; includeCode?: boolean; includeActivities?: boolean; messageFinished?: boolean;
     sessionSettled?: boolean; directory?: string; images?: ReadonlyMap<string, ChatImage>;
     answeredQuestions?: readonly AnsweredQuestionBatch[] } = {}) {
   const parts: ChatMessagePart[] = [];
@@ -336,7 +340,8 @@ export function chatMessageContent(role: string, nativeParts: Part[], subtasks?:
       parts.push({ id: part.id, type: "subtask", text, task: subtasks.get(part.id) ?? subtaskSummary(part) });
     } else if (options.includeTools && role === "assistant" && part.type === "tool") {
       const tool = toolSummary(part, options.directory, options.answeredQuestions);
-      if (options.includeShell && (part.tool === "bash" || part.tool === "shell")) {
+      const isCode = options.includeCode && part.tool === "execute";
+      if (isCode || (options.includeShell && (part.tool === "bash" || part.tool === "shell"))) {
         let shortened = part.state.status !== "pending" && part.state.metadata?.truncated === true;
         const bounded = (value: unknown, limit: number) => {
           const source = typeof value === "string" ? value : "";
@@ -352,13 +357,14 @@ export function chatMessageContent(role: string, nativeParts: Part[], subtasks?:
           return result;
         };
         // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- native tool state can omit `input` despite its non-optional type
-        const command = bounded(part.state.input?.command, 8000);
+        const source = bounded(isCode ? part.state.input?.code : part.state.input?.command, 8000);
         // Native shell streaming uses metadata.output. Only this specific field
         // is projected, not the metadata object or a referenced output file.
         const output = bounded(part.state.status === "completed" ? part.state.output
           : part.state.status === "running" ? part.state.metadata?.output
           : part.state.status === "error" ? part.state.metadata?.output ?? part.state.error : "", 32000);
-        tool.shell = { command, output, truncated: shortened };
+        if (isCode) tool.code = { source, output, truncated: shortened };
+        else tool.shell = { command: source, output, truncated: shortened };
         truncated ||= shortened;
       }
       parts.push({ id: part.id, type: "tool", text, tool });

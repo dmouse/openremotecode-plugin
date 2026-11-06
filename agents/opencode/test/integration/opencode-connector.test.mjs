@@ -309,6 +309,11 @@ test("an OpenCode TUI connector serves encrypted chat operations through the rel
   assert.equal(withShell.body.messages[1].parts[6].tool.description, "Run code")
   assert.equal(JSON.stringify(withShell.body.messages[1]).includes("PRIVATE_"), false)
   assert.equal(withShell.body.messages[1].parts.at(-1).text, "done\n")
+  const withCode = await call("chat.snapshot", { version: 1, projectId, sessionId: toolSeed.id, includeTools: true, includeCode: true })
+  assert.equal(withCode.kind, "response")
+  assert.deepEqual(withCode.body.messages[1].parts[6].tool.code,
+    { source: "PRIVATE_CODE", output: "PRIVATE_CODE_OUTPUT", truncated: false })
+  assert.equal("shell" in withCode.body.messages[1].parts[1].tool, false)
 
   // Streaming: subscribe, observe the initial update, rename the chat live, and see the update
   // arrive over the relay without a fresh request -- across the real event stream.

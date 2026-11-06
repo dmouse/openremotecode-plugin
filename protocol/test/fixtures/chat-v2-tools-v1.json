@@ -31,7 +31,7 @@
         "shell": { "command": "printf 'v2 shell\\n'", "output": "v2 shell\n", "truncated": false } } },
       { "id": "READ_ID", "type": "tool", "text": "[Tool: read · completed]\n", "tool": { "operation": "read", "status": "completed", "description": "mobile/lib/main.dart", "durationMs": 100 } },
       { "id": "FETCH_ID", "type": "tool", "text": "[Tool: webfetch · completed]\n", "tool": { "operation": "fetch", "status": "completed", "description": "docs.example.test", "durationMs": 100 } },
-      { "id": "EXECUTE_ID", "type": "tool", "text": "[Tool: execute · completed]\n", "tool": { "operation": "tool", "status": "completed", "description": "Run code", "durationMs": 100 } },
+      { "id": "EXECUTE_ID", "type": "tool", "text": "[Tool: execute · completed]\n", "tool": { "operation": "execute", "status": "completed", "description": "Run code", "durationMs": 100 } },
       { "id": "SEARCH_ID", "type": "tool", "text": "[Tool: grep · completed]\n", "tool": { "operation": "search", "status": "completed", "description": "\"needle\" in mobile/lib", "durationMs": 100 } }
     ]
   }

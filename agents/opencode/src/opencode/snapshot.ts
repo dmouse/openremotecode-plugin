@@ -131,7 +131,7 @@ export async function buildSnapshot(request: SnapshotRequest): Promise<unknown> 
       const images = body.includeImages === true ? await resolveImages(parts) : undefined;
       return { id: info.id, role: info.role,
         ...chatMessageContent(info.role, parts, subtasks, {
-          includeTools: body.includeTools === true, includeShell: body.includeShell === true,
+          includeTools: body.includeTools === true, includeShell: body.includeShell === true, includeCode: body.includeCode === true,
           includeActivities: body.includeActivities === true, messageFinished, sessionSettled,
           directory: workspace.path, ...(images ? { images } : {}), answeredQuestions: request.answeredQuestions }),
         ...(agent === "build" || agent === "plan" ? { mode: agent } : {}) };

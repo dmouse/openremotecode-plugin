@@ -8,6 +8,52 @@ const fixture = JSON.parse(await readFile(new URL("../../../../protocol/test/fix
 const tools = JSON.parse(await readFile(new URL("../../../../protocol/test/fixtures/chat-tools-v1.json", import.meta.url), "utf8"))
 const shells = JSON.parse(await readFile(new URL("../../../../protocol/test/fixtures/chat-shell-v1.json", import.meta.url), "utf8"))
 const v2tools = JSON.parse(await readFile(new URL("../../../../protocol/test/fixtures/chat-v2-tools-v1.json", import.meta.url), "utf8"))
+const codes = JSON.parse(await readFile(new URL("../../../../protocol/test/fixtures/chat-code-v1.json", import.meta.url), "utf8"))
+
+test("code and skill context match the shared fixture only with code opt-in", () => {
+  const parts = convertMessage(codes.nativeMessage, "ses_code").parts
+  const projected = chatMessageContent("assistant", parts, undefined, { includeTools: true, includeCode: true })
+  assert.deepEqual(projected, { text: codes.response.text, truncated: false,
+    parts: codes.response.parts.map((part, index) => ({ ...part, id: parts[index].id })) })
+  assert.equal(JSON.stringify(projected).includes("PRIVATE_"), false)
+  for (const options of [{}, { includeTools: true }, { includeCode: true },
+    { includeTools: true, includeShell: true }, { includeTools: true, includeCode: false }]) {
+    const result = chatMessageContent("assistant", parts, undefined, options)
+    assert.equal(JSON.stringify(result).includes("const total"), false)
+    assert.equal(JSON.stringify(result).includes("PRIVATE_"), false)
+  }
+})
+
+test("code execution has bounded passive output for every native state", () => {
+  const project = (state) => chatMessageContent("assistant", [{ id: "p", type: "tool", tool: "execute", state }],
+    undefined, { includeTools: true, includeCode: true })
+  const input = { code: "console.log(3)" }
+  const code = (state) => project(state).parts[0].tool.code
+  assert.equal(code({ status: "pending", input }).output, "")
+  assert.equal(code({ status: "running", input, metadata: { output: "partial" } }).output, "partial")
+  assert.equal(code({ status: "completed", input, output: "final" }).output, "final")
+  assert.equal(code({ status: "error", input, error: "failed" }).output, "failed")
+  assert.equal(code({ status: "error", input, error: "failed", metadata: { output: "partial" } }).output, "partial")
+  assert.equal(code({ status: "running", input, metadata: { output: {} } }).output, "")
+  assert.equal(code({ status: "completed", input, output: "\x1b[31mred\x1b[0m\r\n\u202e\x00" }).output, "red\n")
+  assert.equal(code({ status: "completed", input: undefined, output: "" }).source, "")
+  const shortened = project({ status: "completed", input: { code: "c".repeat(9000) }, output: "o".repeat(40000) })
+  assert.equal(shortened.parts[0].tool.code.source.length, 8000)
+  assert.equal(shortened.parts[0].tool.code.output.length, 32000)
+  assert.equal(shortened.parts[0].tool.code.truncated, true)
+  assert.equal(shortened.truncated, true)
+})
+
+test("skill names are bounded display context, never skill contents", () => {
+  const summary = (input) => chatMessageContent("assistant", [{ id: "p", type: "tool", tool: "skill",
+    state: { status: "completed", input, output: "PRIVATE_SKILL" } }], undefined, { includeTools: true }).parts[0].tool
+  assert.equal(summary({ name: "flutter" }).description, "Load skill: flutter")
+  assert.equal(summary({ id: "flutter" }).description, "Load skill: flutter")
+  assert.equal(summary({ name: "a\n\u202eb" }).description, "Load skill: a  b")
+  assert.equal(summary({ name: {} }).description, "Load skill")
+  assert.equal(summary({ name: "n".repeat(1000) }).description.length, 252)
+  assert.equal(JSON.stringify(summary({ name: "flutter", secret: "PRIVATE_INPUT" })).includes("PRIVATE_"), false)
+})
 
 test("V2 tool names and inputs project the shared mobile fixture without raw content", () => {
   const parts = convertMessage(v2tools.nativeMessage, "ses_v2").parts

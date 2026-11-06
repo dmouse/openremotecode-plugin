@@ -118,7 +118,7 @@ async function fixture(t) {
 
 test("advertises exactly the operations it implements", async (t) => {
   const { adapter } = await fixture(t)
-  assert.deepEqual([...adapter.capabilities].sort(), ["chat.abort", "chat.activities", "chat.create", "chat.delete",
+  assert.deepEqual([...adapter.capabilities].sort(), ["chat.abort", "chat.activities", "chat.code", "chat.create", "chat.delete",
     "chat.fork", "chat.get", "chat.images", "chat.list", "chat.models", "chat.permission.reply", "chat.permissions", "chat.prompt",
     "chat.prompt.mode", "chat.prompt.model", "chat.question.reply", "chat.questions", "chat.shell", "chat.snapshot", "chat.subtask.snapshot",
     "chat.tools", "project.list", "project.open"])
@@ -867,10 +867,12 @@ test("readChat re-reads a fresh chat.snapshot, forwarding every opt-in the subsc
   state.messages.set("ses_1", [user(0), assistant(0, [
     { id: "read1", type: "tool", name: "read", time: { created: NOW, completed: NOW + 1 },
       state: { status: "completed", input: { filePath: "/x/a.dart" }, content: [{ type: "text", text: "body" }] } },
+    { id: "code1", type: "tool", name: "execute", time: { created: NOW, completed: NOW + 1 },
+      state: { status: "completed", input: { code: "console.log(3)" }, content: [{ type: "text", text: "3" }] } },
   ])])
   const projectId = (await adapter.execute("project.list", {})).projects[0].id
   const target = { version: 1, projectId, sessionId: "ses_1", subscriptionId: crypto.randomUUID(),
-    includeTools: true, includeShell: true, includeActivities: true, includeSubtasks: true,
+    includeTools: true, includeShell: true, includeCode: true, includeActivities: true, includeSubtasks: true,
     includeImages: true, includePermissions: true, includeQuestions: true }
   const snapshot = await adapter.readChat(target, new AbortController().signal)
   assert.equal(snapshot.chat.id, "ses_1")
@@ -878,6 +880,8 @@ test("readChat re-reads a fresh chat.snapshot, forwarding every opt-in the subsc
   // just fetched by hand, and the client merges updates over its own history.
   assert.equal(snapshot.messages[1].parts[0].tool.operation, "read")
   assert.equal(snapshot.messages[1].parts[0].activity.kind, "read")
+  assert.deepEqual(snapshot.messages[1].parts[1].tool.code, { source: "console.log(3)", output: "3", truncated: false })
+  assert.equal(snapshot.messages[1].parts[1].activity.kind, "execute")
   assert.equal("permission" in snapshot, true)
   assert.equal("question" in snapshot, true, "a pending question stays answerable while streaming")
   assert.equal(calls.some(([name]) => name === "permission.list"), true)

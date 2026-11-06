@@ -24,7 +24,7 @@ const OPERATIONS = ["project.list", "project.open", "chat.list", "chat.create", 
   "chat.question.reply"] as const satisfies readonly ChatOperation[];
 type Supported = (typeof OPERATIONS)[number]
 // Capabilities that are not operations: what a snapshot may carry when the client opts in.
-const CAPABILITIES: readonly string[] = [...OPERATIONS, "chat.permissions", "chat.tools", "chat.shell",
+const CAPABILITIES: readonly string[] = [...OPERATIONS, "chat.permissions", "chat.tools", "chat.shell", "chat.code",
   "chat.questions", "chat.activities", "chat.images", "chat.prompt.mode", "chat.prompt.model"];
 
 const DEADLINE_MS = 10_000;
@@ -33,7 +33,7 @@ const PAGE_SIZE = 50;
 // The content opt-ins a subscription may negotiate, forwarded verbatim into every stream
 // read. includeTodos is deliberately absent: the snapshot refuses it, and a stream must not fail over
 // a flag the connector never advertised.
-const STREAM_OPT_INS = ["includeTools", "includeShell", "includeActivities", "includeSubtasks",
+const STREAM_OPT_INS = ["includeTools", "includeShell", "includeCode", "includeActivities", "includeSubtasks",
   "includeImages", "includePermissions", "includeQuestions"] as const satisfies readonly (keyof ChatStreamTarget)[];
 
 /// OpenCode nests an event's session in different places: some carry it at the top of `data`,

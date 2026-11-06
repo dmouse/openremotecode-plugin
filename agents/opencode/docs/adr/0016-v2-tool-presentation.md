@@ -2,6 +2,10 @@
 
 Status: accepted
 
+Update: [ADR 0018](0018-code-execution-presentation.md) adds an independent
+opt-in for bounded code/results; summary-only clients retain this decision's
+non-disclosure behavior.
+
 ## Context
 
 The V2 connector reused the earlier tool presentation allowlist. The real V2
