@@ -11,6 +11,7 @@ import { WebSocketServer } from "ws"
 
 import {
   CHAT_STREAM_CAPABILITIES,
+  CHAT_LIST_STREAM_CAPABILITIES,
   CONNECTOR_CREDENTIAL_CAPABILITIES,
   connectorHelloSchema,
   decryptRelayEnvelope,
@@ -117,7 +118,8 @@ test("an OpenCode TUI connector serves encrypted chat operations through the rel
     setTimeout(() => reject(new Error("Timed out waiting for connector hello")), 10_000))])
   const message = connectorHelloSchema.parse(connection.message)
   assert.deepEqual(message.capabilities, ["session.list", ...new OpenCodeChatAdapter(opencode, workspace).capabilities,
-    ...PROJECT_MCP_CAPABILITIES, ...CHAT_STREAM_CAPABILITIES, ...VOICE_CAPABILITIES, ...CONNECTOR_CREDENTIAL_CAPABILITIES],
+    ...PROJECT_MCP_CAPABILITIES, ...CHAT_STREAM_CAPABILITIES, ...CHAT_LIST_STREAM_CAPABILITIES,
+    ...VOICE_CAPABILITIES, ...CONNECTOR_CREDENTIAL_CAPABILITIES],
   "advertises only what the adapter implements")
 
   const clientNonce = generateRelayNonce()
@@ -190,7 +192,8 @@ test("an OpenCode TUI connector serves encrypted chat operations through the rel
   const listed = await call("chat.list", { version: 1, projectId })
   assert.deepEqual(listed.body.chats.map((chat) => chat.id), [chatId])
   assert.equal(listed.body.cursor, null)
-  assert.deepEqual((await call("chat.get", { version: 1, projectId, sessionId: chatId })).body.chat, created.body.chat)
+  assert.deepEqual((await call("chat.get", { version: 1, projectId, sessionId: chatId })).body.chat,
+    {...created.body.chat, activity: {status: "idle"}})
 
   const missing = await call("chat.get", { version: 1, projectId, sessionId: "ses_doesnotexist" })
   assert.equal(missing.body.code, "chat_not_found")
@@ -236,8 +239,10 @@ test("an OpenCode TUI connector serves encrypted chat operations through the rel
       content: [{ type: "reasoning", text: `thinking ${i}`, time: { created: now + i * 10 + 5, completed: now + i * 10 + 6 } },
         { type: "text", text: `answer ${i}` }] })
   }
+  const supportsView = typeof opencode.session.view === "function"
   const imported = await opencode.session.import({ info: { ...seed, id: "ses_imported0000000000000001", title: "Imported",
-    time: { created: now, updated: now + 200 } }, messages })
+    ...(supportsView ? {outcome: "succeeded"} : {}),
+    time: { created: now, updated: now + 200, ...(supportsView ? {idle: now + 200} : {}) } }, messages })
   const first = await call("chat.snapshot", { version: 1, projectId, sessionId: imported.id })
   assert.equal(first.kind, "response")
   assert.equal(first.body.chat.title, "Imported")
@@ -247,6 +252,35 @@ test("an OpenCode TUI connector serves encrypted chat operations through the rel
   assert.deepEqual(first.body.messages.at(-1).parts.map((p) => p.type), ["reasoning", "text"])
   assert.equal(first.body.messages.at(-1).mode, "build")
   assert.deepEqual(first.body.model, { providerID: "fixture", modelID: "fixture-model" })
+  if (supportsView) {
+    assert.deepEqual(first.body.chat.activity, {status: "idle", idleAt: now + 200, outcome: "succeeded"})
+    const listTarget = {version: 1, projectIds: [projectId], subscriptionId: crypto.randomUUID()}
+    const listUpdates = []
+    const listener = (data) => { void decryptRelayEnvelope({ recipient: client.identity, sender: message.identity,
+      envelope: JSON.parse(data.toString()), epoch }).then((payload) => {
+      if (payload.operation === "chat.list.updated") listUpdates.push(payload.body)
+    }, () => {}) }
+    connection.socket.on("message", listener)
+    assert.equal((await call("chat.list.subscribe", listTarget)).operation, "chat.list.subscribe")
+    const readyDeadline = Date.now() + 10_000
+    while (!listUpdates.some((update) => update.reset)) {
+      assert.ok(Date.now() < readyDeadline, "list watcher never established its authoritative baseline")
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    const viewBody = {version: 1, projectId, sessionId: imported.id, idleAt: now + 100}
+    assert.deepEqual((await call("chat.view", viewBody)).body, {version: 1, accepted: true})
+    assert.ok((await opencode.session.get({sessionID: imported.id})).time.viewed < now + 200,
+      "viewing an earlier idle cannot acknowledge the new completion")
+    assert.deepEqual((await call("chat.view", {...viewBody, idleAt: now + 200})).body, {version: 1, accepted: true})
+    const deadline = Date.now() + 10_000
+    while (!listUpdates.some((u) => u.changes.some((c) => c.chat.id === imported.id && c.chat.activity?.viewedAt === now + 200))) {
+      assert.ok(Date.now() < deadline, "native viewed event did not update the encrypted chat list")
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    assert.equal((await opencode.session.get({sessionID: imported.id})).time.viewed, now + 200)
+    await call("chat.list.unsubscribe", listTarget)
+    connection.socket.off("message", listener)
+  }
   assert.equal(first.body.status, "idle")
   const seen = [...first.body.messages.map((m) => m.id)]
   let cursor = first.body.cursor

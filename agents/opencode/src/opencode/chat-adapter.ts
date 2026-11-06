@@ -11,7 +11,8 @@ import type { OpenCodeClient, RequestOptions } from "./client.js";
 import { openCodeEvents } from "./event-source.js";
 import { buildModels, modelEffortLevels } from "./models.js";
 import { fetchPendingQuestion, replyToQuestion } from "./questions.js";
-import { buildSnapshot } from "./snapshot.js";
+import { buildSnapshot, sessionStatus } from "./snapshot.js";
+import type { ChatListReader } from "../chat-list-stream.js";
 import { SessionContinuity } from "./session-continuity.js";
 
 // Events fatal to the whole connection, not just one session.
@@ -21,7 +22,7 @@ const FATAL_EVENT = "location.shutdown";
 // the connector's capabilities and, if a client sends it anyway, fails as unsupported_operation.
 const OPERATIONS = ["project.list", "project.open", "chat.list", "chat.create", "chat.get", "chat.fork", "chat.delete", "chat.snapshot",
   "chat.subtask.snapshot", "chat.models", "chat.prompt", "chat.abort", "chat.permission.reply",
-  "chat.question.reply"] as const satisfies readonly ChatOperation[];
+  "chat.question.reply", "chat.view"] as const satisfies readonly ChatOperation[];
 type Supported = (typeof OPERATIONS)[number]
 // Capabilities that are not operations: what a snapshot may carry when the client opts in.
 const CAPABILITIES: readonly string[] = [...OPERATIONS, "chat.permissions", "chat.tools", "chat.shell", "chat.code",
@@ -61,7 +62,10 @@ const session = z.object({
   // redundant switch.
   agent: z.string().check(utf16Length(0, 128)).optional(),
   model: z.object({ id: z.string(), providerID: z.string(), variant: z.string().optional() }).loose().optional(),
-  time: z.object({ updated: z.number().int().nonnegative() }),
+  time: z.object({ updated: z.number().int().nonnegative(),
+    idle: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+    viewed: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional() }),
+  outcome: z.enum(["succeeded", "failed", "interrupted"]).optional(),
   location: z.object({ directory: z.string().min(1) }),
 });
 const page = z.object({
@@ -72,12 +76,18 @@ const active = z.record(z.string(), z.object({ type: z.string() }).loose());
 const listCursor = z.object({ exhausted: z.boolean().optional(), native: z.string().optional(),
   remaining: z.array(z.string()).max(2048).optional() });
 
-export function toChatSummary(value: z.infer<typeof session>) {
+export function toChatSummary(value: z.infer<typeof session>, status?: "idle" | "busy" | "retry" | "unknown") {
   return chatSummarySchema.parse({
     id: value.id,
     title: (value.title ?? "New chat").slice(0, 512),
     updatedAt: value.time.updated,
     ...(value.parentID ? { parentId: value.parentID } : {}),
+    ...(status !== undefined || value.time.idle !== undefined ? { activity: {
+      status: status ?? "unknown",
+      ...(value.time.idle !== undefined ? { idleAt: value.time.idle } : {}),
+      ...(value.time.viewed !== undefined ? { viewedAt: value.time.viewed } : {}),
+      ...(value.outcome !== undefined ? { outcome: value.outcome } : {}),
+    } } : {}),
   });
 }
 
@@ -85,7 +95,14 @@ export function toChatSummary(value: z.infer<typeof session>) {
 /// addresses the same local instance the TUI is attached to; no listener is opened and no
 /// credential is read from disk.
 export class OpenCodeChatAdapter implements ChatAdapter, ChatStreamReader {
-  readonly capabilities: readonly string[] = CAPABILITIES;
+  get capabilities(): readonly string[] {
+    const client: Partial<OpenCodeClient> = this.#client;
+    return CAPABILITIES.filter((c) => c !== "chat.view" || typeof client.session?.view === "function");
+  }
+  readonly listReader: ChatListReader = {
+    watch: (projects, signal, changed) => this.#watchList(projects, signal, changed),
+    read: (projects, ids, signal) => this.#readListChanges(projects, ids, signal),
+  };
   readonly #client: OpenCodeClient;
   readonly #registry: WorkspaceRegistry;
   readonly #cursors = new CursorStore();
@@ -257,7 +274,18 @@ export class OpenCodeChatAdapter implements ChatAdapter, ChatStreamReader {
       return { version: 1, deleted: true };
     }
 
-    if (operation === "chat.get") return { version: 1, chat: toChatSummary(owned) };
+    if (operation === "chat.view") {
+      if (typeof this.#client.session.view !== "function") throw new ChatUnsupportedError(operation);
+      const { idleAt } = chatRequests["chat.view"].parse(body);
+      if (owned.time.idle === undefined || idleAt > owned.time.idle) throw new ChatAccessError("context_expired");
+      await this.#registry.get(workspace.id);
+      await this.#client.session.view({ sessionID: sessionId, idle: idleAt }, options());
+      return { version: 1, accepted: true };
+    }
+    if (operation === "chat.get") {
+      const running = active.parse(await this.#client.session.active(options()));
+      return { version: 1, chat: toChatSummary(owned, sessionStatus(running[sessionId]?.type)) };
+    }
     if (operation === "chat.snapshot") {
       const snapshot = chatRequests["chat.snapshot"].parse(body);
       const signal = this.#deadline(cancellation);
@@ -481,8 +509,65 @@ export class OpenCodeChatAdapter implements ChatAdapter, ChatStreamReader {
       exhausted = result.data.length < limit || !native;
     }
     const next = remaining.length || !exhausted ? JSON.stringify({ remaining, native, exhausted }) : null;
-    return { version: 1, chats: entries.map(toChatSummary),
+    const running = active.parse(await this.#client.session.active({ signal }));
+    return { version: 1, chats: entries.map((entry) => toChatSummary(entry, sessionStatus(running[entry.id]?.type))),
       cursor: this.#cursors.issue(next, workspace.id) };
+  }
+
+  async #watchList(projectIds: readonly string[], signal: AbortSignal, changed: (id?: string) => void): Promise<void> {
+    const projects = await Promise.all(projectIds.map((id) => this.#registry.get(id)));
+    const controller = new AbortController();
+    const watching = AbortSignal.any([signal, controller.signal]);
+    const monitor = (async () => {
+      while (!watching.aborted) {
+        await delay(1000, undefined, { signal: watching, ref: false });
+        for (const id of projectIds) await this.#registry.get(id);
+      }
+    })().catch(() => { controller.abort(); });
+    const types = new Set(["session.created", "session.renamed", "session.moved", "session.viewed", "session.status",
+      "session.execution.started", "session.execution.succeeded", "session.execution.failed", "session.execution.interrupted"]);
+    try {
+      for await (const event of openCodeEvents(this.#client, watching)) {
+        const deleted = event.type === "session.deleted" && projects.some((workspace) =>
+          this.#continuity.knows(eventSessionId(event) ?? "", workspace));
+        this.observeEvent(event);
+        if (event.type === FATAL_EVENT) throw new Error("Chat source disposed");
+        if (event.type === "server.connected" || deleted) changed();
+        else if (types.has(event.type)) {
+          const id = eventSessionId(event);
+          if (id) changed(id);
+        }
+      }
+    } finally { controller.abort(); await monitor; }
+    if (!signal.aborted) throw new Error("Chat list source ended");
+  }
+
+  async #readListChanges(projectIds: readonly string[], ids: readonly string[], signal: AbortSignal) {
+    signal.throwIfAborted();
+    const projects = await Promise.all(projectIds.map((id) => this.#registry.get(id)));
+    signal.throwIfAborted();
+    if (ids.length === 0) return [];
+    const running = active.parse(await this.#client.session.active({ signal }));
+    const changes = [];
+    for (const id of ids) {
+      signal.throwIfAborted();
+      let entry: z.infer<typeof session>;
+      try { entry = session.parse(await this.#client.session.get({ sessionID: id }, { signal })); }
+      catch (error) {
+        if ((error as { _tag?: string })._tag === "SessionNotFoundError") continue;
+        throw error;
+      }
+      if (entry.id !== id || entry.parentID) continue;
+      for (const workspace of projects) {
+        if (entry.location.directory !== workspace.path && !this.#continuity.knows(id, workspace)) continue;
+        await this.#registry.get(workspace.id);
+        await this.#continuity.authorize(entry, workspace);
+        changes.push({ projectId: workspace.id, chat: toChatSummary(entry, sessionStatus(running[id]?.type)) });
+      }
+    }
+    for (const id of projectIds) await this.#registry.get(id);
+    signal.throwIfAborted();
+    return changes;
   }
 
   async #assertInWorkspace(entry: z.infer<typeof session>, workspace: Workspace): Promise<void> {

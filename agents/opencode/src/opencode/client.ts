@@ -10,6 +10,7 @@ export interface OpenCodeClient {
     list(input: { directory?: string; parentID: string | null; limit: number; cursor?: string }, options: RequestOptions): Promise<unknown>
     create(input: { location: { directory: string } }, options: RequestOptions): Promise<unknown>
     get(input: { sessionID: string }, options: RequestOptions): Promise<unknown>
+    view?(input: { sessionID: string; idle: number }, options: RequestOptions): Promise<unknown>
     fork(input: { sessionID: string }, options: RequestOptions): Promise<unknown>
     remove(input: { sessionID: string }, options: RequestOptions): Promise<unknown>
     prompt(input: { sessionID: string; text: string }, options: RequestOptions): Promise<unknown>

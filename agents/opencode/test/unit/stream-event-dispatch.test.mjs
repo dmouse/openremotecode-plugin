@@ -37,8 +37,16 @@ function snapshot(text) {
 async function setup(t) {
   const connector = await generateConnectorIdentity()
   const client = await generateConnectorIdentity()
-  const state = { envelopes: [], changed: undefined, result: snapshot("hello") }
+  const state = { envelopes: [], changed: undefined, listChanged: undefined, views: 0, result: snapshot("hello") }
   const reader = {
+    listReader: {
+      read: async () => [{projectId: PROJECT, chat: {id: "session", title: "List", updatedAt: 1000,
+        activity: {status: "idle", idleAt: 1000, outcome: "succeeded"}}}],
+      watch: async (_projects, signal, changed) => {
+        state.listChanged = changed
+        await new Promise((resolve) => signal.addEventListener("abort", resolve, {once: true}))
+      },
+    },
     readChat: async () => state.result,
     watchChat: async (_target, signal, changed) => {
       state.changed = changed
@@ -51,19 +59,20 @@ async function setup(t) {
     trustedClient: client.identity.publicIdentity,
     sessions: { listSessions: async () => [] },
     stream: reader,
+    chats: { capabilities: ["chat.view"], execute: async () => { state.views++; return {version: 1, accepted: true} } },
   })
   t.after(() => dispatcher.dispose())
   dispatcher.setEpoch(TEST_EPOCH)
   dispatcher.attachRelay((envelope) => { state.envelopes.push(envelope); return true })
 
   let sequence = 0
-  const request = async (operation, body) => encryptRelayPayload({
+  const request = async (operation, body, requestId = crypto.randomUUID()) => encryptRelayPayload({
     sender: client.identity,
     recipient: connector.identity.publicIdentity,
     payload: {
       protocolVersion: RELAY_PROTOCOL_VERSION,
       kind: "request",
-      requestId: crypto.randomUUID(),
+      requestId,
       sentAt: Date.now(),
       operation,
       body,
@@ -111,6 +120,36 @@ test("a subscribed chat stream delivers an encrypted update to the client", asyn
   assert.equal(update.protocolVersion, RELAY_PROTOCOL_VERSION)
   assert.equal(update.requestId, SUBSCRIPTION)
   assert.equal(update.body.snapshot.messages[0].text, "streamed reply")
+})
+
+test("list summaries cross the encrypted dispatcher without message content and stop on unsubscribe", async (t) => {
+  const f = await setup(t)
+  const list = {version: 1, projectIds: [PROJECT], subscriptionId: SUBSCRIPTION}
+  assert.ok(f.dispatcher.capabilities.includes("chat.list.subscribe"))
+  const response = await f.decode(await f.dispatcher.handle(await f.request("chat.list.subscribe", list)))
+  assert.equal(response.body.revision, 0)
+  f.state.listChanged("session")
+  const events = await f.waitForEvents(1)
+  const update = events.find((e) => e.operation === "chat.list.updated")
+  assert.ok(update)
+  assert.equal(update.body.changes[0].chat.activity.outcome, "succeeded")
+  assert.equal(JSON.stringify(update).includes('"messages"'), false)
+  assert.equal(f.state.envelopes[0].body, undefined)
+  await f.dispatcher.handle(await f.request("chat.list.unsubscribe", list))
+  f.state.listChanged("session")
+  await delay(200)
+  assert.equal((await f.events()).length, 1)
+})
+
+test("view acknowledgments are journaled and cannot be changed under a reused request ID", async (t) => {
+  const f = await setup(t)
+  const body = {version: 1, projectId: PROJECT, sessionId: "session", idleAt: 1000}
+  const id = crypto.randomUUID()
+  await f.dispatcher.handle(await f.request("chat.view", body, id))
+  await f.dispatcher.handle(await f.request("chat.view", body, id))
+  assert.equal(f.state.views, 1)
+  assert.equal(await f.dispatcher.handle(await f.request("chat.view", {...body, idleAt: 2000}, id)), undefined)
+  assert.equal(f.state.views, 1)
 })
 
 test("every dispatcher-built event carries the current protocol version", async (t) => {

@@ -1,7 +1,9 @@
 import { chatResponses, chatStreamUpdateSchema, type ChatStreamTarget, type ChatStreamUpdate } from "@openremotecode/protocol";
 import { ChatAccessError } from "./chat-adapter.js";
+import type { ChatListReader } from "./chat-list-stream.js";
 
 export interface ChatStreamReader {
+  listReader?: ChatListReader
   readChat(target: ChatStreamTarget, signal: AbortSignal, reconcile?: boolean): Promise<unknown>
   watchChat(target: ChatStreamTarget, signal: AbortSignal, changed: (reset: boolean) => void): Promise<void>
 }

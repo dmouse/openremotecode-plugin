@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { utf16Length } from "@openremotecode/protocol";
+import { chatSummarySchema, utf16Length } from "@openremotecode/protocol";
 import { chatMessageContent, permissionSummary, questionSummary, resolveImages } from "../chat-message.js";
 import { ChatAccessError, ChatUnsupportedError } from "../chat/access-error.js";
 import type { AnsweredQuestionBatch } from "../chat-message.js";
@@ -37,7 +37,7 @@ const permissions = z.array(z.object({
 /// difference is not cosmetic -- `sessionSettled` below reads idle as proof that an
 /// interrupted tool call was abandoned (ADR 0012), so collapsing an unfamiliar busy state
 /// into idle would animate a working session's parts as dead.
-function sessionStatus(type: string | undefined): "idle" | "busy" | "retry" | "unknown" {
+export function sessionStatus(type: string | undefined): "idle" | "busy" | "retry" | "unknown" {
   if (type === undefined) return "idle";
   if (type === "running") return "busy";
   if (type === "retry" || type === "retrying") return "retry";
@@ -100,6 +100,7 @@ export async function buildSnapshot(request: SnapshotRequest): Promise<unknown> 
     : permissions.parse(pending).find((entry) => entry.sessionID === sessionId);
   const runningParsed = active.parse(running);
   const status = sessionStatus(runningParsed[sessionId]?.type);
+  const summary = chatSummarySchema.parse(chat);
   const subtasks = body.includeSubtasks === true || request.operation === "chat.subtask.snapshot"
     ? await resolveSubtasks(client, workspace, sessionId,
         messages.filter((m) => m.info.role === "assistant").flatMap((m) => m.parts.slice(0, 100)),
@@ -115,7 +116,7 @@ export async function buildSnapshot(request: SnapshotRequest): Promise<unknown> 
     body.includePermissions === true && questions?.known === true;
   return {
     version: 1,
-    chat,
+    chat: summary.activity ? { ...summary, activity: { ...summary.activity, status } } : summary,
     cursor: cursors.issue(more, workspace.id, sessionId),
     status,
     ...(model ? { model } : {}),

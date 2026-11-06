@@ -117,11 +117,56 @@ async function fixture(t) {
 }
 
 test("advertises exactly the operations it implements", async (t) => {
-  const { adapter } = await fixture(t)
+  const { adapter, root } = await fixture(t)
+  assert.equal(new OpenCodeChatAdapter({}, root).capabilities.includes("chat.view"), false,
+    "a partial host context must not prevent relay startup")
   assert.deepEqual([...adapter.capabilities].sort(), ["chat.abort", "chat.activities", "chat.code", "chat.create", "chat.delete",
     "chat.fork", "chat.get", "chat.images", "chat.list", "chat.models", "chat.permission.reply", "chat.permissions", "chat.prompt",
     "chat.prompt.mode", "chat.prompt.model", "chat.question.reply", "chat.questions", "chat.shell", "chat.snapshot", "chat.subtask.snapshot",
     "chat.tools", "project.list", "project.open"])
+})
+
+test("activity summaries use authoritative active state and native completion/view clocks", async (t) => {
+  const { adapter, projectId, add, state } = await fixture(t)
+  add("ses_done", { outcome: "succeeded", time: { updated: NOW, idle: NOW, viewed: NOW - 10 } })
+  add("ses_busy", { outcome: "succeeded", time: { updated: NOW, idle: NOW - 100, viewed: NOW - 100 } })
+  add("ses_failed", { outcome: "failed", time: { updated: NOW, idle: NOW } })
+  state.active.ses_busy = { type: "running" }
+  const { chats } = await adapter.execute("chat.list", { version: 1, projectId })
+  assert.deepEqual(chats.find((c) => c.id === "ses_done").activity,
+    { status: "idle", idleAt: NOW, viewedAt: NOW - 10, outcome: "succeeded" })
+  assert.equal(chats.find((c) => c.id === "ses_busy").activity.status, "busy")
+  assert.equal(chats.find((c) => c.id === "ses_failed").activity.outcome, "failed")
+})
+
+test("view acknowledges the observed completion, refuses future clocks and foreign/subtask sessions", async (t) => {
+  const { adapter, projectId, add, client, calls, other } = await fixture(t)
+  assert.equal(adapter.capabilities.includes("chat.view"), false)
+  client.session.view = async (input) => { calls.push(["session.view", input]) }
+  assert.equal(adapter.capabilities.includes("chat.view"), true)
+  add("ses_done", { time: { updated: NOW, idle: NOW } })
+  const body = { version: 1, projectId, sessionId: "ses_done", idleAt: NOW - 100 }
+  assert.deepEqual(await adapter.execute("chat.view", body), {version: 1, accepted: true})
+  assert.deepEqual(calls.find(([name]) => name === "session.view")[1], {sessionID: "ses_done", idle: NOW - 100})
+  await assert.rejects(adapter.execute("chat.view", {...body, idleAt: NOW + 1}), {code: "context_expired"})
+  add("ses_foreign", {location: {directory: other}})
+  add("ses_child", {parentID: "ses_done"})
+  for (const sessionId of ["ses_foreign", "ses_child"]) {
+    await assert.rejects(adapter.execute("chat.view", {...body, sessionId}), {code: "access_denied"})
+  }
+  assert.equal(calls.filter(([name]) => name === "session.view").length, 1)
+})
+
+test("list updates never expose foreign roots or children, nor read message history", async (t) => {
+  const { adapter, projectId, add, state, other, calls } = await fixture(t)
+  add("ses_own", {outcome: "succeeded", time: {updated: NOW, idle: NOW}})
+  add("ses_foreign", {location: {directory: other}})
+  add("ses_child", {parentID: "ses_own"})
+  state.active.ses_own = {type: "retrying"}
+  const updates = await adapter.listReader.read([projectId], ["ses_own", "ses_foreign", "ses_child"], AbortSignal.timeout(1000))
+  assert.deepEqual(updates.map((u) => [u.projectId, u.chat.id, u.chat.activity.status]), [[projectId, "ses_own", "retry"]])
+  assert.equal(calls.some(([name]) => name === "message.list"), false)
+  await assert.rejects(adapter.listReader.read([crypto.randomUUID()], ["ses_own"], AbortSignal.timeout(1000)), {code: "context_expired"})
 })
 
 test("only persistent approvals grant projects; disabling denies saved handles, moved chats, MCP and legacy reads", async (t) => {
@@ -447,7 +492,8 @@ test("chat.create verifies ownership and get maps a missing session to chat_not_
   const created = await adapter.execute("chat.create", { version: 1, projectId })
   assert.equal(created.chat.id, "ses_new")
   assert.deepEqual(calls.find(([name]) => name === "session.create")[1], { location: { directory: root } })
-  assert.deepEqual(await adapter.execute("chat.get", { version: 1, projectId, sessionId: "ses_new" }), created)
+  assert.deepEqual(await adapter.execute("chat.get", { version: 1, projectId, sessionId: "ses_new" }),
+    { ...created, chat: { ...created.chat, activity: { status: "idle" } } })
   await assert.rejects(adapter.execute("chat.get", { version: 1, projectId, sessionId: "ses_missing" }), { code: "chat_not_found" })
 })
 

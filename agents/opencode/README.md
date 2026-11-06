@@ -173,6 +173,13 @@ unconfirmed inference about OpenCode's own tools -- see
 [ADR 0013](docs/adr/0013-opencode-2-tui-hosting.md) for what is and isn't verified, and
 [ADR 0014](docs/adr/0014-opencode-2-only.md) for the removal of OpenCode 1.x support.
 
+Live chat-list metadata reports working/retry state and, when OpenCode provides
+it, completion outcome and viewed timestamps without fetching conversations.
+A negotiated `chat.view` acknowledges exactly the completion the phone rendered,
+so read state stays consistent with OpenCode's other clients. It is not a generic
+session-update endpoint. See [the activity contract](../../protocol/CHAT-ACTIVITY.md)
+and [ADR 0020](docs/adr/0020-chat-list-activity.md) for bounds and threat analysis.
+
 See the [authorized project contexts ADR](docs/adr/0002-authorized-project-contexts.md)
 before extending session browsing or adding path entry. The legacy `session.list`
 returns the newest 50 root sessions of the plugin's own directory; it does not expose

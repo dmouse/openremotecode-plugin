@@ -5,6 +5,7 @@ import {
   projectMcpRequests, projectMcpResponses, PROJECT_MCP_CAPABILITIES,
   projectMcpUpdatedEventSchema, type ProjectMcpOperation,
   chatStreamRequests, CHAT_STREAM_CAPABILITIES,
+  chatListStreamRequests, CHAT_LIST_STREAM_CAPABILITIES,
   CONNECTOR_CREDENTIAL_CAPABILITIES, CONNECTOR_CREDENTIAL_UPDATED_OPERATION,
   CONNECTOR_CREDENTIAL_VERSION, connectorCredentialUpdatedEventSchema,
   type ConnectorCredentialOutcome,
@@ -27,6 +28,7 @@ import {
 import { ChatAccessError, ChatUnsupportedError, type ChatAdapter, type SessionReader } from "./chat-adapter.js";
 import { ProjectMcpSubscriptions, readProjectMcp, type ProjectMcpReader } from "./project-mcp.js";
 import { ChatStreams, type ChatStreamReader } from "./chat-stream.js";
+import { ChatListStreams } from "./chat-list-stream.js";
 import { VoiceSessions } from "./voice/voice-sessions.js";
 import { VoiceError, type VoiceEngine } from "./voice/hex-engine.js";
 
@@ -45,9 +47,9 @@ interface CommandDispatcherOptions {
 }
 
 const mutations = new Set<ChatOperation>(["chat.create", "chat.prompt", "chat.abort", "chat.delete", "chat.rename", "chat.fork",
-  "chat.permission.reply", "chat.question.reply"]);
+  "chat.permission.reply", "chat.question.reply", "chat.view"]);
 interface RelayBinding { controller: AbortController; send: (envelope: EncryptedRelayEnvelope) => boolean
-  subscriptions?: ProjectMcpSubscriptions; chats?: ChatStreams }
+  subscriptions?: ProjectMcpSubscriptions; chats?: ChatStreams; lists?: ChatListStreams }
 
 export class CommandDispatcher {
   readonly #connectorIdentity: ConnectorIdentity;
@@ -69,6 +71,7 @@ export class CommandDispatcher {
 
   get capabilities(): string[] { return [SESSION_LIST_OPERATION, ...(this.#chats ? this.#chats.capabilities ?? CHAT_CAPABILITIES : []),
     ...(this.#mcp ? PROJECT_MCP_CAPABILITIES : []), ...(this.#stream ? CHAT_STREAM_CAPABILITIES : []),
+    ...(this.#stream?.listReader ? CHAT_LIST_STREAM_CAPABILITIES : []),
     ...(this.#voice ? VOICE_CAPABILITIES : []), ...CONNECTOR_CREDENTIAL_CAPABILITIES]; }
 
   constructor(options: CommandDispatcherOptions) {
@@ -169,7 +172,20 @@ export class CommandDispatcher {
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the signal can abort during the preceding await
       if (envelope && !controller.signal.aborted) send(envelope);
     }) : undefined;
-    const binding: RelayBinding = { controller, send, ...(subscriptions ? { subscriptions } : {}), ...(chats ? { chats } : {}) };
+    const sendList = async (operation: string, body: unknown, subscriptionId: string, signal: AbortSignal) => {
+      if (controller.signal.aborted || signal.aborted) return false;
+      const request = relayPayloadSchema.parse({ protocolVersion: RELAY_PROTOCOL_VERSION, kind: "event", operation,
+        requestId: subscriptionId, sentAt: this.#now(), body });
+      const envelope = await this.#encryptEvent(request, operation, body);
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- cancellation during encryption
+      if (controller.signal.aborted || signal.aborted) return false;
+      return envelope ? send(envelope) : false;
+    };
+    const lists = this.#stream?.listReader ? new ChatListStreams(this.#stream.listReader,
+      (update, signal) => sendList("chat.list.updated", update, update.subscriptionId, signal),
+      async (target) => { await sendList("chat.list.closed", target, target.subscriptionId, controller.signal); }) : undefined;
+    const binding: RelayBinding = { controller, send, ...(subscriptions ? { subscriptions } : {}),
+      ...(chats ? { chats } : {}), ...(lists ? { lists } : {}) };
     this.#relay = binding;
     void this.#flushCredentialNotice();
     return () => { if (this.#relay === binding) this.dispose(); };
@@ -180,6 +196,7 @@ export class CommandDispatcher {
     this.#relay?.controller.abort();
     this.#relay?.subscriptions?.dispose();
     this.#relay?.chats?.dispose();
+    this.#relay?.lists?.dispose();
     this.#relay = undefined;
   }
 
@@ -262,6 +279,22 @@ export class CommandDispatcher {
       } catch (error) {
         return this.#errorResponse(request, { code: error instanceof VoiceError || error instanceof ChatAccessError
           ? error.code : "voice_unavailable", message: "Voice transcription could not complete" });
+      }
+    }
+
+    if (this.#stream?.listReader && Object.hasOwn(chatListStreamRequests, request.operation)) {
+      const operation = request.operation as keyof typeof chatListStreamRequests;
+      const body = chatListStreamRequests[operation].safeParse(request.body);
+      if (!body.success) return this.#errorResponse(request, { code: "invalid_request", message: "The list request is invalid" });
+      try {
+        if (!relay?.lists) throw new ChatAccessError("context_expired");
+        const result = operation === "chat.list.subscribe" ? relay.lists.subscribe(body.data) : relay.lists.unsubscribe(body.data);
+        return await this.#encryptResponse(request, operation, result);
+      } catch (error) {
+        const code = error instanceof ChatAccessError ? error.code : "opencode_error";
+        this.#log("warn", "Chat list subscription failed", { code });
+        return this.#errorResponse(request, { code,
+          message: "The list subscription could not complete" });
       }
     }
 
