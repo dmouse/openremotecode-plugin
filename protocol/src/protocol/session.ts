@@ -31,6 +31,9 @@ export const protocolErrorBodySchema = z
       "uncertain_outcome",
       "chat_not_found",
       "chat_busy",
+      "voice_unavailable",
+      "voice_busy",
+      "voice_expired",
     ]),
     message: z.string().min(1).max(256),
   })

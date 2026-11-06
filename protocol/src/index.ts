@@ -44,6 +44,8 @@ export {
   type RelayEpochInput,
 } from "./protocol/epoch.js";
 export { ReplayWindow } from "./protocol/replay-window.js";
+export { VOICE_VERSION, VOICE_CAPABILITIES, VOICE_CHUNK_BYTES, VOICE_MAX_AUDIO_BYTES,
+  voiceRequests, voiceResponses, type VoiceOperation, type VoiceTarget } from "./protocol/voice.js";
 export {
   clientHelloSchema,
   clientOfflineSchema,
