@@ -23,6 +23,7 @@ import { RelayConnection, type RelayLogLevel } from "./relay-connection.js";
 import { RemoteAPIClient } from "./remote-api-client.js";
 import { configuredServiceOrigin, validateLocalRelayURL } from "./service-origin.js";
 import { monitorAuthorization } from "./auth/authorization-monitor.js";
+import { HexVoiceEngine } from "./voice/hex-engine.js";
 
 const PLUGIN_VERSION = "0.3.0";
 const RELAY_URL_ENVIRONMENT_VARIABLE = "OPENCODE_REMOTE_RELAY_URL";
@@ -268,11 +269,12 @@ export async function startConnector(host: ConnectorHost): Promise<ConnectorHand
 }
 
 function adapterOptions(adapters: ConnectorAdapters): {
-  sessions: SessionReader; chats: ChatAdapter; mcp?: ProjectMcpReader; stream?: ChatStreamReader
+  sessions: SessionReader; chats: ChatAdapter; mcp?: ProjectMcpReader; stream?: ChatStreamReader; voice: HexVoiceEngine
 } {
   return {
     sessions: adapters.sessions,
     chats: adapters.chats,
+    voice: new HexVoiceEngine(),
     ...(adapters.mcp ? { mcp: adapters.mcp } : {}),
     ...(adapters.stream ? { stream: adapters.stream } : {}),
   };

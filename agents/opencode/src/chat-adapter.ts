@@ -1,4 +1,4 @@
-import type { ChatOperation, RemoteSession } from "@openremotecode/protocol";
+import type { ChatOperation, RemoteSession, VoiceTarget } from "@openremotecode/protocol";
 import { ChatAccessError, ChatUnsupportedError } from "./chat/access-error.js";
 
 // The interfaces the command dispatcher calls. The OpenCode implementation lives in
@@ -12,6 +12,7 @@ export interface ChatAdapter {
   /// explicitly instead of discovering a gap at request time.
   readonly capabilities?: readonly string[]
   execute(operation: ChatOperation, body: Record<string, unknown>): Promise<unknown>
+  authorizeVoice?(target: VoiceTarget, signal: AbortSignal): Promise<void>
 }
 
 /// Serves the connector's `session.list` operation.

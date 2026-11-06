@@ -1,7 +1,7 @@
 import { realpath } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import { chatRequests, chatSummarySchema, type ChatOperation, type ChatStreamTarget } from "@openremotecode/protocol";
+import { chatRequests, chatSummarySchema, type ChatOperation, type ChatStreamTarget, type VoiceTarget } from "@openremotecode/protocol";
 import { ChatAccessError, ChatUnsupportedError, type ChatAdapter } from "../chat-adapter.js";
 import { AnsweredQuestionMemory } from "../chat/answered-questions.js";
 import type { ChatStreamReader } from "../chat-stream.js";
@@ -123,6 +123,17 @@ export class OpenCodeChatAdapter implements ChatAdapter, ChatStreamReader {
       await this.#registry.get(body.projectId);
     }
     return result;
+  }
+
+  async authorizeVoice(target: VoiceTarget, signal: AbortSignal): Promise<void> {
+    const workspace = await this.#registry.get(target.projectId);
+    if (target.sessionId !== undefined) {
+      const owned = await this.#owned(workspace, target.sessionId, this.#deadline(signal));
+      if (owned.parentID) throw new ChatAccessError("access_denied");
+      await this.#continuity.authorize(owned, workspace);
+    }
+    await this.#registry.get(target.projectId);
+    signal.throwIfAborted();
   }
 
   async #run(operation: Supported, body: Record<string, unknown>, cancellation?: AbortSignal): Promise<unknown> {

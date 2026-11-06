@@ -177,3 +177,17 @@ See the [authorized project contexts ADR](docs/adr/0002-authorized-project-conte
 before extending session browsing or adding path entry. The legacy `session.list`
 returns the newest 50 root sessions of the plugin's own directory; it does not expose
 pagination or guarantee a complete list.
+
+## Local Hex voice input
+
+With Hex running and a GGUF speech model loaded, the connector can transcribe
+encrypted phone audio through Hex's local streaming API. The composer microphone
+produces a draft; the mobile header's Call action automatically submits completed
+utterances. The connector advertises five versioned `voice.*` operations. A
+read-only `voice.status` checks the running local API without opening a stream;
+the mobile app hides both entry buttons until that check succeeds and refreshes
+while the conversation is visible. Busy or missing-model conditions still return
+a recoverable error when starting a recording.
+It never starts Hex, downloads a model, opens an inbound port, reads dictation
+history, or transfers Hex credentials to the phone. See
+[ADR 0019](docs/adr/0019-hex-voice-input.md) and the [voice contract](../../protocol/VOICE.md).

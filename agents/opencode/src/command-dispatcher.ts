@@ -13,6 +13,7 @@ import {
   relayPayloadSchema,
   RELAY_PROTOCOL_VERSION,
   ReplayWindow,
+  voiceRequests, voiceResponses, VOICE_CAPABILITIES, type VoiceOperation,
   SESSION_LIST_OPERATION,
   sessionListRequestBodySchema,
   sessionListResponseBodySchema,
@@ -26,6 +27,8 @@ import {
 import { ChatAccessError, ChatUnsupportedError, type ChatAdapter, type SessionReader } from "./chat-adapter.js";
 import { ProjectMcpSubscriptions, readProjectMcp, type ProjectMcpReader } from "./project-mcp.js";
 import { ChatStreams, type ChatStreamReader } from "./chat-stream.js";
+import { VoiceSessions } from "./voice/voice-sessions.js";
+import { VoiceError, type VoiceEngine } from "./voice/hex-engine.js";
 
 interface CommandDispatcherOptions {
   connectorIdentity: ConnectorIdentity
@@ -34,6 +37,7 @@ interface CommandDispatcherOptions {
   chats?: ChatAdapter
   mcp?: ProjectMcpReader
   stream?: ChatStreamReader
+  voice?: VoiceEngine
   now?: () => number
   /// Diagnostics only. Never receives prompt text, tool output or credentials — the relay's
   /// own logging rules apply, so it carries counts and reasons and nothing else.
@@ -55,6 +59,7 @@ export class CommandDispatcher {
   readonly #chats: ChatAdapter | undefined;
   readonly #mcp: ProjectMcpReader | undefined;
   readonly #stream: ChatStreamReader | undefined;
+  readonly #voice: VoiceSessions | undefined;
   #relay: RelayBinding | undefined;
   #incoming = 0;
   #epoch: string | undefined;
@@ -64,7 +69,7 @@ export class CommandDispatcher {
 
   get capabilities(): string[] { return [SESSION_LIST_OPERATION, ...(this.#chats ? this.#chats.capabilities ?? CHAT_CAPABILITIES : []),
     ...(this.#mcp ? PROJECT_MCP_CAPABILITIES : []), ...(this.#stream ? CHAT_STREAM_CAPABILITIES : []),
-    ...CONNECTOR_CREDENTIAL_CAPABILITIES]; }
+    ...(this.#voice ? VOICE_CAPABILITIES : []), ...CONNECTOR_CREDENTIAL_CAPABILITIES]; }
 
   constructor(options: CommandDispatcherOptions) {
     this.#connectorIdentity = options.connectorIdentity;
@@ -73,6 +78,8 @@ export class CommandDispatcher {
     this.#chats = options.chats;
     this.#mcp = options.mcp;
     this.#stream = options.stream;
+    const authorize = options.chats?.authorizeVoice?.bind(options.chats);
+    this.#voice = options.voice && authorize ? new VoiceSessions(options.voice, authorize) : undefined;
     this.#now = options.now ?? Date.now;
     this.#log = options.log ?? (() => undefined);
   }
@@ -86,6 +93,7 @@ export class CommandDispatcher {
    */
   setEpoch(epoch: string | undefined): void {
     if (epoch === this.#epoch) return;
+    this.#voice?.dispose();
     this.#epoch = epoch;
     this.#inbound = epoch === undefined ? undefined : new ReplayWindow();
     this.#outgoingSequence = 0;
@@ -168,6 +176,7 @@ export class CommandDispatcher {
   }
 
   dispose(): void {
+    this.#voice?.dispose();
     this.#relay?.controller.abort();
     this.#relay?.subscriptions?.dispose();
     this.#relay?.chats?.dispose();
@@ -239,6 +248,21 @@ export class CommandDispatcher {
         code: "invalid_request",
         message: "Only request payloads can be dispatched",
       });
+    }
+
+    if (this.#voice && Object.hasOwn(voiceRequests, request.operation)) {
+      const operation = request.operation as VoiceOperation;
+      const body = voiceRequests[operation].safeParse(request.body);
+      if (!body.success) return this.#errorResponse(request, { code: "invalid_request", message: "The voice request is invalid" });
+      const epoch = this.#epoch;
+      try {
+        const result = voiceResponses[operation].parse(await this.#voice.execute(operation, body.data));
+        if (this.#epoch !== epoch) throw new VoiceError("voice_expired");
+        return await this.#encryptResponse(request, operation, result);
+      } catch (error) {
+        return this.#errorResponse(request, { code: error instanceof VoiceError || error instanceof ChatAccessError
+          ? error.code : "voice_unavailable", message: "Voice transcription could not complete" });
+      }
     }
 
     if (this.#stream && Object.hasOwn(chatStreamRequests, request.operation)) {
