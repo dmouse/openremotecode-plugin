@@ -1,0 +1,24 @@
+{
+  "nativeMessage": {
+    "id": "msg_code", "type": "assistant", "time": { "created": 1000, "completed": 2000 },
+    "content": [
+      { "id": "p_code", "type": "tool", "name": "execute", "time": { "created": 1000, "completed": 1100 },
+        "state": { "status": "completed", "input": { "code": "const total = 1 + 2;\nconsole.log(total);", "secret": "PRIVATE_INPUT" },
+          "content": [{ "type": "text", "text": "3\n" }], "metadata": { "secret": "PRIVATE_METADATA" } } },
+      { "id": "p_skill", "type": "tool", "name": "skill", "time": { "created": 1100, "completed": 1200 },
+        "state": { "status": "completed", "input": { "name": "flutter-apply-architecture-best-practices", "secret": "PRIVATE_INPUT" },
+          "content": [{ "type": "text", "text": "PRIVATE_SKILL_CONTENT" }] } }
+    ]
+  },
+  "response": {
+    "id": "msg_code", "role": "assistant", "truncated": false,
+    "text": "[Tool: execute · completed]\n[Tool: skill · completed]\n",
+    "parts": [
+      { "id": "CODE_ID", "type": "tool", "text": "[Tool: execute · completed]\n",
+        "tool": { "operation": "execute", "status": "completed", "description": "Run code", "durationMs": 100,
+          "code": { "source": "const total = 1 + 2;\nconsole.log(total);", "output": "3\n", "truncated": false } } },
+      { "id": "SKILL_ID", "type": "tool", "text": "[Tool: skill · completed]\n",
+        "tool": { "operation": "tool", "status": "completed", "description": "Load skill: flutter-apply-architecture-best-practices", "durationMs": 100 } }
+    ]
+  }
+}

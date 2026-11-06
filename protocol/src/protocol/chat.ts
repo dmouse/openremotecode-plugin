@@ -24,17 +24,17 @@ export const chatRequests = {
   "project.open": z.object({ ...version, path: z.string().min(1).max(4096) }).strict(),
   "chat.list": z.object({ ...project, cursor: z.uuid().optional() }).strict(),
   "chat.snapshot": z.object({ ...session, cursor: z.uuid().optional(), includeSubtasks: z.boolean().optional(),
-    includeTools: z.boolean().optional(), includeShell: z.boolean().optional(), includeActivities: z.boolean().optional(),
+    includeTools: z.boolean().optional(), includeShell: z.boolean().optional(), includeCode: z.boolean().optional(), includeActivities: z.boolean().optional(),
     includeImages: z.boolean().optional(), includePermissions: z.boolean().optional(),
     includeQuestions: z.boolean().optional(),
     includeTodos: z.boolean().optional() }).strict()
-    .refine((body) => !body.includeShell || body.includeTools === true),
+    .refine((body) => (body.includeShell !== true && body.includeCode !== true) || body.includeTools === true),
   "chat.subtask.snapshot": z.object({ ...session, parentSessionId: id,
-    cursor: z.uuid().optional(), includeTools: z.boolean().optional(), includeShell: z.boolean().optional(), includeActivities: z.boolean().optional(),
+    cursor: z.uuid().optional(), includeTools: z.boolean().optional(), includeShell: z.boolean().optional(), includeCode: z.boolean().optional(), includeActivities: z.boolean().optional(),
     includeImages: z.boolean().optional(), includePermissions: z.boolean().optional(),
     includeQuestions: z.boolean().optional(),
     includeTodos: z.boolean().optional() }).strict()
-    .refine((body) => !body.includeShell || body.includeTools === true),
+    .refine((body) => (body.includeShell !== true && body.includeCode !== true) || body.includeTools === true),
   "chat.create": z.object(project).strict(),
   "chat.get": z.object(session).strict(),
   "chat.rename": z.object({ ...session, title: z.string().trim().min(1).max(512) }).strict(),
@@ -62,7 +62,7 @@ export const chatRequests = {
       ? body.answers === undefined
       : body.answers !== undefined),
 } as const;
-export const CHAT_CAPABILITIES = [...Object.keys(chatRequests), "chat.prompt.mode", "chat.prompt.model", "chat.tools", "chat.shell", "chat.activities", "chat.images", "chat.permissions", "chat.questions", "chat.todos"];
+export const CHAT_CAPABILITIES = [...Object.keys(chatRequests), "chat.prompt.mode", "chat.prompt.model", "chat.tools", "chat.shell", "chat.code", "chat.activities", "chat.images", "chat.permissions", "chat.questions", "chat.todos"];
 export type ChatOperation = keyof typeof chatRequests
 export const projectSummarySchema = z.object({
   id: z.uuid(), name: z.string().min(1).max(256), path: z.string().min(1).max(4096),
@@ -100,7 +100,10 @@ export const chatMessagePartSchema = z.discriminatedUnion("type", [
       durationMs: z.number().int().nonnegative().optional(),
       shell: z.object({ command: z.string().max(8000), output: z.string().max(32000),
         truncated: z.boolean() }).strict().optional(),
-    }).strict().refine((tool) => !tool.shell || tool.operation === "execute"),
+      code: z.object({ source: z.string().max(8000), output: z.string().max(32000),
+        truncated: z.boolean() }).strict().optional(),
+    }).strict().refine((tool) => ((!tool.shell && !tool.code) || tool.operation === "execute") &&
+      !(tool.shell && tool.code)),
   }).strict(),
   z.object({ id, type: z.literal("subtask"), text: z.string().max(48000), activity: activitySchema.optional(),
     task: z.object({
@@ -192,8 +195,9 @@ const message = z.object({
   new Set(message.parts.map((part) => part.id)).size === message.parts.length &&
   message.parts.reduce((length, part) => length + part.text.length +
     (part.type === "tool" && part.tool.shell ? part.tool.shell.command.length + part.tool.shell.output.length : 0) +
+    (part.type === "tool" && part.tool.code ? part.tool.code.source.length + part.tool.code.output.length : 0) +
     (part.type === "image" ? part.image.data.length : 0), 0) <= 48000 &&
-  (!message.parts.some((part) => part.type === "tool" && part.tool.shell?.truncated) || message.truncated) &&
+  (!message.parts.some((part) => part.type === "tool" && (part.tool.shell?.truncated === true || part.tool.code?.truncated === true)) || message.truncated) &&
   message.parts.filter((part) => part.type !== "reasoning" && part.type !== "image")
     .map((part) => part.text).join("") === message.text
 ));

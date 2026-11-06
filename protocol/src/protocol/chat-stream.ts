@@ -4,10 +4,11 @@ const target = { version: z.literal(1), projectId: z.uuid(), sessionId: z.string
   parentSessionId: z.string().min(1).max(128).optional(), subscriptionId: z.uuid() };
 export const chatStreamRequests = {
   "chat.stream.subscribe": z.object({ ...target, includeTools: z.boolean().optional(), includeShell: z.boolean().optional(),
+    includeCode: z.boolean().optional(),
     includeActivities: z.boolean().optional(), includeSubtasks: z.boolean().optional(), includeImages: z.boolean().optional(),
     includePermissions: z.boolean().optional(), includeQuestions: z.boolean().optional(),
     includeTodos: z.boolean().optional() }).strict()
-    .refine((body) => !body.includeShell || body.includeTools === true),
+    .refine((body) => (body.includeShell !== true && body.includeCode !== true) || body.includeTools === true),
   "chat.stream.unsubscribe": z.object(target).strict(),
 };
 export const chatStreamUpdateSchema = z.object({ ...target,
