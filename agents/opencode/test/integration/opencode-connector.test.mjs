@@ -20,6 +20,7 @@ import {
   generateRelayNonce,
   PROJECT_MCP_CAPABILITIES,
   RELAY_PROTOCOL_VERSION,
+  VOICE_CAPABILITIES,
 } from "@openremotecode/protocol"
 
 import { setupConnector } from "../../dist/opencode/setup.js"
@@ -116,7 +117,7 @@ test("an OpenCode TUI connector serves encrypted chat operations through the rel
     setTimeout(() => reject(new Error("Timed out waiting for connector hello")), 10_000))])
   const message = connectorHelloSchema.parse(connection.message)
   assert.deepEqual(message.capabilities, ["session.list", ...new OpenCodeChatAdapter(opencode, workspace).capabilities,
-    ...PROJECT_MCP_CAPABILITIES, ...CHAT_STREAM_CAPABILITIES, ...CONNECTOR_CREDENTIAL_CAPABILITIES],
+    ...PROJECT_MCP_CAPABILITIES, ...CHAT_STREAM_CAPABILITIES, ...VOICE_CAPABILITIES, ...CONNECTOR_CREDENTIAL_CAPABILITIES],
   "advertises only what the adapter implements")
 
   const clientNonce = generateRelayNonce()
@@ -145,6 +146,12 @@ test("an OpenCode TUI connector serves encrypted chat operations through the rel
     connection.socket.send(JSON.stringify(request))
     return reply
   }
+
+  const voiceStatus = await call("voice.status", { version: 1 })
+  assert.equal(voiceStatus.kind, "response")
+  assert.deepEqual(Object.keys(voiceStatus.body).sort(), ["available", "version"])
+  assert.equal(voiceStatus.body.version, 1)
+  assert.equal(typeof voiceStatus.body.available, "boolean", "voice availability is separate from supported capabilities")
 
   const approvals = new FileFolderApprovalStore(resolveFolderApprovalsPath())
   assert.deepEqual((await call("project.list", { version: 1 })).body.projects, [], "loading a TUI grants no folders")
